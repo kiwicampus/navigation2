@@ -230,9 +230,17 @@ protected:
 
     auto future_goal_handle = action_client_->async_send_goal(goal_, send_goal_options);
 
-    if (rclcpp::spin_until_future_complete(node_, future_goal_handle, server_timeout_) !=
+    /*if (rclcpp::spin_until_future_complete(node_, future_goal_handle, server_timeout_) !=
       rclcpp::FutureReturnCode::SUCCESS)
     {
+      throw std::runtime_error("send_goal failed");
+    }*/
+    
+    auto rtn = rclcpp::spin_until_future_complete(node_, future_goal_handle, server_timeout_);
+    if (rtn != rclcpp::FutureReturnCode::SUCCESS)
+    {
+      std::cout << "Is timeout? " << rtn ==  rclcpp::FutureReturnCode::TIMEOUT << std::endl;
+      std::cout << "Is interrupted? " << rtn ==  rclcpp::FutureReturnCode::INTERRUPTED << std::endl;
       throw std::runtime_error("send_goal failed");
     }
 
