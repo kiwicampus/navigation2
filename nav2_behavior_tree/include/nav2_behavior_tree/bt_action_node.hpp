@@ -239,8 +239,9 @@ protected:
     auto rtn = rclcpp::spin_until_future_complete(node_, future_goal_handle, server_timeout_);
     if (rtn != rclcpp::FutureReturnCode::SUCCESS)
     {
-      std::cout << "Is timeout? " << rtn ==  rclcpp::FutureReturnCode::TIMEOUT << std::endl;
-      std::cout << "Is interrupted? " << rtn ==  rclcpp::FutureReturnCode::INTERRUPTED << std::endl;
+      std::cout << "rtn " << rtn << std::endl; 
+      std::cout << "Is timeout? " << (rtn ==  rclcpp::FutureReturnCode::TIMEOUT) << std::endl;
+      std::cout << "Is interrupted? " << (rtn ==  rclcpp::FutureReturnCode::INTERRUPTED) << std::endl;
       throw std::runtime_error("send_goal failed");
     }
 
