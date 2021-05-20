@@ -212,6 +212,13 @@ protected:
            status == action_msgs::msg::GoalStatus::STATUS_EXECUTING;
   }
 
+std::string get_env(const std::string& env_name, const std::string& default_value)
+{
+    char* value;
+    value = getenv(env_name.c_str());
+    if (value != NULL) return std::string(value);
+    return default_value;
+}
 
   void on_new_goal_received()
   {
@@ -230,9 +237,32 @@ protected:
 
     auto future_goal_handle = action_client_->async_send_goal(goal_, send_goal_options);
 
-    if (rclcpp::spin_until_future_complete(node_, future_goal_handle, server_timeout_) !=
-      rclcpp::FutureReturnCode::SUCCESS)
+    // if (rclcpp::spin_until_future_complete(node_, future_goal_handle, server_timeout_) !=
+    //   rclcpp::FutureReturnCode::SUCCESS)
+    // {
+    //   throw std::runtime_error("send_goal failed");
+    // }
+
+    auto t_start = std::chrono::high_resolution_clock::now();
+
+    int millis = stoi(get_env("BT_ACTION_TIMEOUT_MILLIS", "10"));
+    rclcpp::FutureReturnCode rtn;
+
+    if (millis > 0){
+      // auto rtn = rclcpp::spin_until_future_complete(node_, future_goal_handle, server_timeout_);
+      rtn = rclcpp::spin_until_future_complete(node_, future_goal_handle,  std::chrono::milliseconds(millis));
+    }
+    else{
+      rtn = rclcpp::spin_until_future_complete(node_, future_goal_handle);
+    }
+
+    auto t_end = std::chrono::high_resolution_clock::now();
+    std::cout << "Elapsed: " << std::chrono::duration<double, std::milli>(t_end - t_start).count() << " ms" << std::endl;
+    if (rtn != rclcpp::FutureReturnCode::SUCCESS)
     {
+      std::cout << "rtn " << rtn << std::endl; 
+      std::cout << "Is timeout? " << (rtn ==  rclcpp::FutureReturnCode::TIMEOUT) << std::endl;
+      std::cout << "Is interrupted? " << (rtn ==  rclcpp::FutureReturnCode::INTERRUPTED) << std::endl;
       throw std::runtime_error("send_goal failed");
     }
 
