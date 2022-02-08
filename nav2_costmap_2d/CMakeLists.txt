@@ -88,6 +88,7 @@ add_library(layers SHARED
   src/observation_buffer.cpp
   plugins/voxel_layer.cpp
   plugins/range_sensor_layer.cpp
+  plugins/semantic_segmentation_layer.cpp
 )
 ament_target_dependencies(layers
   ${dependencies}
