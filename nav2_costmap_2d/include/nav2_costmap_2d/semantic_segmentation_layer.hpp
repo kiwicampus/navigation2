@@ -53,6 +53,8 @@
 #include "rclcpp/rclcpp.hpp"
 #include "vision_msgs/msg/semantic_segmentation.hpp"
 #include "opencv2/core.hpp"
+#include "message_filters/subscriber.h"
+#include "message_filters/time_synchronizer.h"
 
 namespace nav2_costmap_2d {
 
@@ -60,6 +62,13 @@ struct MessageTf
 {
     vision_msgs::msg::SemanticSegmentation message;
     geometry_msgs::msg::TransformStamped transform;
+};
+
+struct MessagePointcloud
+{
+    vision_msgs::msg::SemanticSegmentation message;
+    sensor_msgs::msg::PointCloud2 original_pointcloud;
+    sensor_msgs::msg::PointCloud2 world_frame_pointcloud;
 };
 
 class SemanticSegmentationLayer : public CostmapLayer
@@ -81,11 +90,19 @@ class SemanticSegmentationLayer : public CostmapLayer
    private:
     void segmentationCb(vision_msgs::msg::SemanticSegmentation::SharedPtr msg);
 
+    void segmentationCb2(const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation> &msg);
+
+    void syncSegmPointcloudCb(const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation> &segmentation, const std::shared_ptr<const sensor_msgs::msg::PointCloud2> &pointcloud);
+
     RayCaster ray_caster_;
 
     std::shared_ptr<ObjectBuffer<MessageTf>> msg_buffer_;
+    std::shared_ptr<ObjectBuffer<MessagePointcloud>> msg_pc_buffer_;
 
     rclcpp::Subscription<vision_msgs::msg::SemanticSegmentation>::SharedPtr semantic_segmentation_sub_;
+    std::shared_ptr<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation>> semantic_segmentation_sub_2_;
+    std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>> pointcloud_sub_;
+    std::shared_ptr<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation, sensor_msgs::msg::PointCloud2>> segm_pc_sync_;
 
     vision_msgs::msg::SemanticSegmentation latest_segmentation_message;
 

@@ -126,6 +126,27 @@ bool RayCaster::imageToGroundPlaneLookup(cv::Point2d& pixel, geometry_msgs::msg:
     return true;
 }
 
+bool RayCaster::imageToGroundPlaneLookup(cv::Point2d& pixel, geometry_msgs::msg::PointStamped& point, sensor_msgs::PointCloud2ConstIterator<float> iter_x, sensor_msgs::PointCloud2ConstIterator<float> iter_y, sensor_msgs::PointCloud2ConstIterator<float> iter_z)
+{
+    geometry_msgs::msg::PointStamped point_world_frame;
+    int point_idx = pixel.y*img_width_+pixel.x;
+    if (*(iter_z+point_idx)>max_trace_distance_)
+    {
+        RCLCPP_DEBUG(parent_node_->get_logger(),"Point falls further than the max trace distance, will not raycast");
+        return false;
+    }
+    point_world_frame.point.x = *(iter_x+point_idx);
+    point_world_frame.point.y = *(iter_y+point_idx);
+    point = point_world_frame;
+    return true;
+}
+
+void RayCaster::setPointcloudIterators(sensor_msgs::PointCloud2ConstIterator<float> iter_x, sensor_msgs::PointCloud2ConstIterator<float> iter_y, sensor_msgs::PointCloud2ConstIterator<float> iter_z)
+{
+    *iter_x_=iter_x;
+    *iter_y_=iter_y;
+    *iter_z_=iter_z;
+}
 geometry_msgs::msg::PointStamped RayCaster::rayToPointStamped(cv::Point3d& ray_end, std::string& frame_id)
 {
     geometry_msgs::msg::PointStamped point;

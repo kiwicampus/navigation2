@@ -94,12 +94,25 @@ void SemanticSegmentationLayer::onInitialize()
 
     matchSize();
 
+    rmw_qos_profile_t custom_qos_profile = rmw_qos_profile_sensor_data;
     semantic_segmentation_sub_ = node->create_subscription<vision_msgs::msg::SemanticSegmentation>(segmentation_topic, rclcpp::SensorDataQoS(), std::bind(&SemanticSegmentationLayer::segmentationCb, this, std::placeholders::_1));
+    semantic_segmentation_sub_2_ = std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation>>(rclcpp_node_, segmentation_topic, custom_qos_profile);
+    // if(use_pointcloud)
+    // {
+        pointcloud_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(rclcpp_node_, pointcloud_topic, custom_qos_profile);
+        segm_pc_sync_ = std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation, sensor_msgs::msg::PointCloud2>>(*semantic_segmentation_sub_2_, *pointcloud_sub_, 5);
+        segm_pc_sync_->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this, std::placeholders::_1, std::placeholders::_2));
+    // }
+    // else
+    // {
+        semantic_segmentation_sub_2_->registerCallback(std::bind(&SemanticSegmentationLayer::segmentationCb2, this, std::placeholders::_1));
+    // }
 
     ray_caster_.initialize(rclcpp_node_, camera_info_topic, pointcloud_topic, use_pointcloud, tf_, global_frame_, tf2::Duration(0), max_lookahead_distance);
 
+
     msg_buffer_ = std::make_shared<ObjectBuffer<MessageTf>>(node, observation_keep_time);
-    
+    msg_pc_buffer_ = std::make_shared<ObjectBuffer<MessagePointcloud>>(node, observation_keep_time);
 }
 
 // The method is called to ask the plugin: which area of costmap it needs to update.
@@ -116,9 +129,14 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
         return;
     } 
     std::vector<MessageTf> segmentations;
+    std::vector<MessagePointcloud> segmentations2;
     msg_buffer_->getObjects(segmentations);
+    msg_pc_buffer_->getObjects(segmentations2);
     int processed_msgs = 0;
-    for(auto& segmentation : segmentations){
+    for(auto& segmentation : segmentations2){
+        sensor_msgs::PointCloud2ConstIterator<float> iter_x(segmentation.world_frame_pointcloud, "x");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_y(segmentation.world_frame_pointcloud, "y");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_z(segmentation.original_pointcloud, "z");
         int touched_cells = 0;
         for(size_t v = 0; v < segmentation.message.height; v=v+2)
         {
@@ -128,7 +146,8 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
                 pixel_idx.x = u;
                 pixel_idx.y = v;
                 geometry_msgs::msg::PointStamped world_point;
-                if(!ray_caster_.imageToGroundPlaneLookup(pixel_idx, world_point, segmentation.transform))
+                // if(!ray_caster_.imageToGroundPlaneLookup(pixel_idx, world_point, segmentation.transform))
+                if(!ray_caster_.imageToGroundPlaneLookup(pixel_idx, world_point, iter_x, iter_y, iter_z))
                 {
                     RCLCPP_DEBUG(logger_, "Could not raycast");
                     continue;
@@ -260,6 +279,37 @@ void SemanticSegmentationLayer::segmentationCb(vision_msgs::msg::SemanticSegment
     message_tf.transform = current_transform;
     msg_buffer_->bufferObject(message_tf, msg->header.stamp);
     RCLCPP_INFO(logger_, "msg buffered");
+}
+
+void SemanticSegmentationLayer::segmentationCb2(const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation> &msg){
+    (void) *msg;
+    // std::cout << "troll" << std::endl;
+}
+
+void SemanticSegmentationLayer::syncSegmPointcloudCb(const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation> &segmentation, const std::shared_ptr<const sensor_msgs::msg::PointCloud2> &pointcloud)
+{
+    std::cout << "synctroll" << std::endl;
+    geometry_msgs::msg::TransformStamped current_transform;
+    sensor_msgs::msg::PointCloud2 transformed_cloud;
+    try
+    {
+        current_transform = tf_->lookupTransform(global_frame_, pointcloud->header.frame_id, pointcloud->header.stamp);
+        tf2::doTransform(*pointcloud, transformed_cloud, current_transform);
+    }
+    catch (tf2::TransformException & ex) {
+        // if an exception occurs, we need to remove the empty observation from the list
+        RCLCPP_ERROR(
+        logger_,
+        "TF Exception that should never happen for sensor frame: %s, cloud frame: %s, %s",
+        pointcloud->header.frame_id.c_str(),
+        global_frame_.c_str(), ex.what());
+        return;
+    }
+    MessagePointcloud message_pc;
+    message_pc.world_frame_pointcloud = transformed_cloud;
+    message_pc.original_pointcloud = *pointcloud;
+    message_pc.message = *segmentation;
+    msg_pc_buffer_->bufferObject(message_pc, segmentation->header.stamp);
 }
 
 void SemanticSegmentationLayer::reset()

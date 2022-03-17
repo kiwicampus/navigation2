@@ -15,6 +15,7 @@
 #include "geometry_msgs/msg/point.hpp"
 #include "geometry_msgs/msg/point_stamped.hpp"
 #include "tf2/convert.h"
+#include "sensor_msgs/point_cloud2_iterator.hpp"
 
 
 
@@ -62,7 +63,10 @@ public:
     bool imageToGroundPlane(cv::Point2d& pixel, geometry_msgs::msg::PointStamped& point);
 
     bool imageToGroundPlaneLookup(cv::Point2d& pixel, geometry_msgs::msg::PointStamped& point, geometry_msgs::msg::TransformStamped sensor_to_world_tf);
-    
+
+    bool imageToGroundPlaneLookup(cv::Point2d& pixel, geometry_msgs::msg::PointStamped& point, sensor_msgs::PointCloud2ConstIterator<float> iter_x, sensor_msgs::PointCloud2ConstIterator<float> iter_y, sensor_msgs::PointCloud2ConstIterator<float> iter_z);  
+
+    void setPointcloudIterators(sensor_msgs::PointCloud2ConstIterator<float> iter_x, sensor_msgs::PointCloud2ConstIterator<float> iter_y, sensor_msgs::PointCloud2ConstIterator<float> iter_z);  
 
 private:
 
@@ -93,6 +97,9 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr aligned_pc2_sub_;
 
     sensor_msgs::msg::PointCloud2 pointcloud_msg_;
+    std::shared_ptr<sensor_msgs::PointCloud2ConstIterator<float>> iter_x_;
+    std::shared_ptr<sensor_msgs::PointCloud2ConstIterator<float>> iter_y_;
+    std::shared_ptr<sensor_msgs::PointCloud2ConstIterator<float>> iter_z_;
     image_geometry::PinholeCameraModel camera_model_ = image_geometry::PinholeCameraModel();
 
     geometry_msgs::msg::PointStamped camera_origin_;
