@@ -25,6 +25,7 @@ find_package(tf2_sensor_msgs REQUIRED)
 find_package(image_geometry REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(angles REQUIRED)
+find_package(backward_ros REQUIRED)
 
 remove_definitions(-DDISABLE_LIBUSB-1.0)
 find_package(Eigen3 REQUIRED)

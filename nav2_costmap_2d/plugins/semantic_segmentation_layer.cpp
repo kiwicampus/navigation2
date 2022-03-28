@@ -78,7 +78,7 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + "combination_method", combination_method_);
     declareParameter("use_pointcloud", rclcpp::ParameterValue(false));
     node->get_parameter(name_ + "." + "use_pointcloud", use_pointcloud);
-    declareParameter("max_lookahead_distance", rclcpp::ParameterValue(3.0));
+    declareParameter("max_lookahead_distance", rclcpp::ParameterValue(5.0));
     node->get_parameter(name_ + "." + "max_lookahead_distance", max_lookahead_distance);
     declareParameter("segmentation_topic", rclcpp::ParameterValue(""));
     node->get_parameter(name_ + "." + "segmentation_topic", segmentation_topic);
@@ -100,7 +100,7 @@ void SemanticSegmentationLayer::onInitialize()
     // if(use_pointcloud)
     // {
         pointcloud_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(rclcpp_node_, pointcloud_topic, custom_qos_profile);
-        segm_pc_sync_ = std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation, sensor_msgs::msg::PointCloud2>>(*semantic_segmentation_sub_2_, *pointcloud_sub_, 5);
+        segm_pc_sync_ = std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation, sensor_msgs::msg::PointCloud2>>(*semantic_segmentation_sub_2_, *pointcloud_sub_, 100);
         segm_pc_sync_->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this, std::placeholders::_1, std::placeholders::_2));
     // }
     // else
@@ -134,6 +134,7 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
     msg_pc_buffer_->getObjects(segmentations2);
     int processed_msgs = 0;
     for(auto& segmentation : segmentations2){
+        RCLCPP_INFO(logger_, "Processing segmentations: sgm width,height: %i,%i ! pc width,height: %i,%i", segmentation.message.width, segmentation.message.height, segmentation.original_pointcloud.width, segmentation.original_pointcloud.height);
         sensor_msgs::PointCloud2ConstIterator<float> iter_x(segmentation.world_frame_pointcloud, "x");
         sensor_msgs::PointCloud2ConstIterator<float> iter_y(segmentation.world_frame_pointcloud, "y");
         sensor_msgs::PointCloud2ConstIterator<float> iter_z(segmentation.original_pointcloud, "z");
@@ -259,7 +260,7 @@ void SemanticSegmentationLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_g
 
 void SemanticSegmentationLayer::segmentationCb(vision_msgs::msg::SemanticSegmentation::SharedPtr msg)
 {
-    // latest_segmentation_message = *msg;
+    std::cout << "not filter troll" << msg->header.stamp.sec << std::endl;
     geometry_msgs::msg::TransformStamped current_transform;
     try
     {
@@ -282,13 +283,17 @@ void SemanticSegmentationLayer::segmentationCb(vision_msgs::msg::SemanticSegment
 }
 
 void SemanticSegmentationLayer::segmentationCb2(const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation> &msg){
-    (void) *msg;
-    // std::cout << "troll" << std::endl;
+    std::cout << "filter troll" << msg->header.stamp.sec << std::endl;
 }
 
 void SemanticSegmentationLayer::syncSegmPointcloudCb(const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation> &segmentation, const std::shared_ptr<const sensor_msgs::msg::PointCloud2> &pointcloud)
 {
     std::cout << "synctroll" << std::endl;
+    if(segmentation->width != pointcloud->width || segmentation->height != pointcloud->height)
+    {
+        RCLCPP_WARN(logger_, "Pointcloud and segmentation sizes are different, will not buffer, WTF!");
+        return;
+    }
     geometry_msgs::msg::TransformStamped current_transform;
     sensor_msgs::msg::PointCloud2 transformed_cloud;
     try
