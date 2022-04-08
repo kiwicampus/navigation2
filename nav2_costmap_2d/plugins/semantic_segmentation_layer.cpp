@@ -68,9 +68,9 @@ void SemanticSegmentationLayer::onInitialize()
     {
         throw std::runtime_error{"Failed to lock node"};
     }
-    std::string segmentation_topic, camera_info_topic, pointcloud_topic;
+    std::string segmentation_topic, camera_info_topic, pointcloud_topic, sensor_frame;
     bool use_pointcloud;
-    double max_lookahead_distance, observation_keep_time;
+    double max_lookahead_distance, min_lookahead_distance, observation_keep_time, transform_tolerance, expected_update_rate;
 
     declareParameter("enabled", rclcpp::ParameterValue(true));
     node->get_parameter(name_ + "." + "enabled", enabled_);
@@ -80,6 +80,8 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + "use_pointcloud", use_pointcloud);
     declareParameter("max_lookahead_distance", rclcpp::ParameterValue(5.0));
     node->get_parameter(name_ + "." + "max_lookahead_distance", max_lookahead_distance);
+    declareParameter("min_lookahead_distance", rclcpp::ParameterValue(0.3));
+    node->get_parameter(name_ + "." + "min_lookahead_distance", min_lookahead_distance);
     declareParameter("segmentation_topic", rclcpp::ParameterValue(""));
     node->get_parameter(name_ + "." + "segmentation_topic", segmentation_topic);
     declareParameter("camera_info_topic", rclcpp::ParameterValue(""));
@@ -88,6 +90,12 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + "pointcloud_topic", pointcloud_topic);
     declareParameter("observation_persistence", rclcpp::ParameterValue(0.0));
     node->get_parameter(name_ + "." + "observation_persistence", observation_keep_time);
+    declareParameter(name_ + "." + "expected_update_rate", rclcpp::ParameterValue(0.0));
+    node->get_parameter(name_  + "." + "sensor_frame", sensor_frame);
+    node->get_parameter(
+      name_ + "." + "expected_update_rate",
+      expected_update_rate);
+    node->get_parameter("transform_tolerance", transform_tolerance);
 
     global_frame_ = layered_costmap_->getGlobalFrameID();
     rolling_window_ = layered_costmap_->isRolling();
@@ -95,24 +103,28 @@ void SemanticSegmentationLayer::onInitialize()
     matchSize();
 
     rmw_qos_profile_t custom_qos_profile = rmw_qos_profile_sensor_data;
-    semantic_segmentation_sub_ = node->create_subscription<vision_msgs::msg::SemanticSegmentation>(segmentation_topic, rclcpp::SensorDataQoS(), std::bind(&SemanticSegmentationLayer::segmentationCb, this, std::placeholders::_1));
-    semantic_segmentation_sub_2_ = std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation>>(rclcpp_node_, segmentation_topic, custom_qos_profile);
-    // if(use_pointcloud)
-    // {
-        pointcloud_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(rclcpp_node_, pointcloud_topic, custom_qos_profile);
-        segm_pc_sync_ = std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation, sensor_msgs::msg::PointCloud2>>(*semantic_segmentation_sub_2_, *pointcloud_sub_, 100);
-        segm_pc_sync_->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this, std::placeholders::_1, std::placeholders::_2));
-    // }
-    // else
-    // {
-        semantic_segmentation_sub_2_->registerCallback(std::bind(&SemanticSegmentationLayer::segmentationCb2, this, std::placeholders::_1));
-    // }
+    // semantic_segmentation_sub_ = node->create_subscription<vision_msgs::msg::SemanticSegmentation>(segmentation_topic, rclcpp::SensorDataQoS(), std::bind(&SemanticSegmentationLayer::segmentationCb, this, std::placeholders::_1));
+    semantic_segmentation_sub_= std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation>>(rclcpp_node_, segmentation_topic, custom_qos_profile);
+    pointcloud_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(rclcpp_node_, pointcloud_topic, custom_qos_profile);
+    pointcloud_tf_sub_ = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(*pointcloud_sub_, *tf_, global_frame_, 50, rclcpp_node_, tf2::durationFromSec(transform_tolerance));
+    segm_pc_sync_ = std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation, sensor_msgs::msg::PointCloud2>>(*semantic_segmentation_sub_, *pointcloud_tf_sub_, 100);
+    segm_pc_sync_->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this, std::placeholders::_1, std::placeholders::_2));
+    
+    observation_buffer_ = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(node, pointcloud_topic, observation_keep_time, expected_update_rate,
+        max_lookahead_distance,
+        min_lookahead_distance,
+        *tf_,
+        global_frame_,
+        sensor_frame, tf2::durationFromSec(transform_tolerance));
 
-    ray_caster_.initialize(rclcpp_node_, camera_info_topic, pointcloud_topic, use_pointcloud, tf_, global_frame_, tf2::Duration(0), max_lookahead_distance);
+    sgm_debug_pub_ = node->create_publisher<vision_msgs::msg::SemanticSegmentation>("/buffered_segmentation", 1);
+    orig_pointcloud_pub_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("/buffered_pointcloud", 1);
+    proc_pointcloud_pub_ = node->create_publisher<sensor_msgs::msg::PointCloud2>("/processed_pointcloud", 1);
+    // ray_caster_.initialize(rclcpp_node_, camera_info_topic, pointcloud_topic, use_pointcloud, tf_, global_frame_, tf2::Duration(0), max_lookahead_distance);
 
 
-    msg_buffer_ = std::make_shared<ObjectBuffer<MessageTf>>(node, observation_keep_time);
-    msg_pc_buffer_ = std::make_shared<ObjectBuffer<MessagePointcloud>>(node, observation_keep_time);
+    // msg_buffer_ = std::make_shared<ObjectBuffer<MessageTf>>(node, observation_keep_time);
+    // msg_pc_buffer_ = std::make_shared<ObjectBuffer<MessagePointcloud>>(node, observation_keep_time);
 }
 
 // The method is called to ask the plugin: which area of costmap it needs to update.
@@ -128,46 +140,37 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
         current_ = true;
         return;
     } 
-    std::vector<MessageTf> segmentations;
-    std::vector<MessagePointcloud> segmentations2;
-    msg_buffer_->getObjects(segmentations);
-    msg_pc_buffer_->getObjects(segmentations2);
+    // std::vector<MessageTf> segmentations;
+    // std::vector<MessagePointcloud> segmentations2;
+    // msg_buffer_->getObjects(segmentations);
+    // msg_pc_buffer_->getObjects(segmentations2);
+    std::vector<nav2_costmap_2d::Observation> observations;
+    observation_buffer_->lock();
+    observation_buffer_->getObservations(observations);
+    observation_buffer_->unlock();
     int processed_msgs = 0;
-    for(auto& segmentation : segmentations2){
-        RCLCPP_INFO(logger_, "Processing segmentations: sgm width,height: %i,%i ! pc width,height: %i,%i", segmentation.message.width, segmentation.message.height, segmentation.original_pointcloud.width, segmentation.original_pointcloud.height);
-        sensor_msgs::PointCloud2ConstIterator<float> iter_x(segmentation.world_frame_pointcloud, "x");
-        sensor_msgs::PointCloud2ConstIterator<float> iter_y(segmentation.world_frame_pointcloud, "y");
-        sensor_msgs::PointCloud2ConstIterator<float> iter_z(segmentation.original_pointcloud, "z");
-        int touched_cells = 0;
-        for(size_t v = 0; v < segmentation.message.height; v=v+2)
+    for(auto& observation : observations){
+        proc_pointcloud_pub_->publish(*observation.cloud_);
+        sensor_msgs::PointCloud2ConstIterator<float> iter_x(*observation.cloud_, "x");
+        sensor_msgs::PointCloud2ConstIterator<float> iter_y(*observation.cloud_, "y");
+        // sensor_msgs::PointCloud2ConstIterator<float> iter_z(*observation.cloud_, "z");
+        sensor_msgs::PointCloud2ConstIterator<uint8_t> iter_class(*observation.cloud_, "class");
+        // sensor_msgs::PointCloud2ConstIterator<uint8_t> iter_confidence(*observation.cloud_, "confidence");
+        for(size_t point = 0; point < observation.cloud_->height*observation.cloud_->width; point++)
         {
-            for(size_t u = 0; u < segmentation.message.width; u=u+2){
-                uint8_t pixel = segmentation.message.data[v*segmentation.message.width+u];
-                cv::Point2d pixel_idx;
-                pixel_idx.x = u;
-                pixel_idx.y = v;
-                geometry_msgs::msg::PointStamped world_point;
-                // if(!ray_caster_.imageToGroundPlaneLookup(pixel_idx, world_point, segmentation.transform))
-                if(!ray_caster_.imageToGroundPlaneLookup(pixel_idx, world_point, iter_x, iter_y, iter_z))
-                {
-                    RCLCPP_DEBUG(logger_, "Could not raycast");
-                    continue;
-                }
-                unsigned int mx, my;
-                if(!worldToMap(world_point.point.x, world_point.point.y, mx, my))
-                {
-                    RCLCPP_DEBUG(logger_, "Computing map coords failed");
-                    continue;
-                }
-                unsigned int index = getIndex(mx, my);
-                if(pixel!= 1){
-                    costmap_[index] = 100;
-                }else{
-                    costmap_[index] = 0;
-                }
-                touch(world_point.point.x, world_point.point.y, min_x, min_y, max_x, max_y);
-                touched_cells++;
+            unsigned int mx, my;
+            if(!worldToMap(*(iter_x+point), *(iter_y+point), mx, my))
+            {
+                RCLCPP_DEBUG(logger_, "Computing map coords failed");
+                continue;
             }
+            unsigned int index = getIndex(mx, my);
+            if(*(iter_class+point)!= 1){
+                costmap_[index] = nav2_costmap_2d::LETHAL_OBSTACLE;
+            }else{
+                costmap_[index] = nav2_costmap_2d::FREE_SPACE;
+            }
+            touch(*(iter_x+point), *(iter_y+point), min_x, min_y, max_x, max_y);
         }
         processed_msgs++;
     }
@@ -175,38 +178,6 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
     {
         RCLCPP_INFO(logger_, "Processed %i segmentations", processed_msgs);
     }
-    // vision_msgs::msg::SemanticSegmentation current_segmentation = latest_segmentation_message;
-    // int touched_cells = 0;
-    // for(size_t v = 0; v < current_segmentation.height; v=v+5)
-    // {
-    //     for(size_t u = 0; u < current_segmentation.width; u=u+5){
-    //         uint8_t pixel = current_segmentation.data[v*current_segmentation.width+u];
-    //         cv::Point2d pixel_idx;
-    //         pixel_idx.x = u;
-    //         pixel_idx.y = v;
-    //         geometry_msgs::msg::PointStamped world_point;
-    //         if(!ray_caster_.imageToGroundPlane(pixel_idx, world_point))
-    //         {
-    //             RCLCPP_DEBUG(logger_, "Could not raycast");
-    //             continue;
-    //         }
-    //         unsigned int mx, my;
-    //         if(!worldToMap(world_point.point.x, world_point.point.y, mx, my))
-    //         {
-    //             RCLCPP_DEBUG(logger_, "Computing map coords failed");
-    //             continue;
-    //         }
-    //         unsigned int index = getIndex(mx, my);
-    //         if(pixel!= 1){
-    //             costmap_[index] = 100;
-    //         }else{
-    //             costmap_[index] = 0;
-    //         }
-    //         touch(world_point.point.x, world_point.point.y, min_x, min_y, max_x, max_y);
-    //         touched_cells++;
-    //     }
-    // }
-    // RCLCPP_INFO(logger_, "touched %i cells", touched_cells);
     
 }
 
@@ -289,32 +260,22 @@ void SemanticSegmentationLayer::segmentationCb2(const std::shared_ptr<const visi
 void SemanticSegmentationLayer::syncSegmPointcloudCb(const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation> &segmentation, const std::shared_ptr<const sensor_msgs::msg::PointCloud2> &pointcloud)
 {
     std::cout << "synctroll" << std::endl;
-    if(segmentation->width != pointcloud->width || segmentation->height != pointcloud->height)
+    if(segmentation->width*segmentation->height != pointcloud->width*pointcloud->height)
     {
         RCLCPP_WARN(logger_, "Pointcloud and segmentation sizes are different, will not buffer, WTF!");
         return;
     }
-    geometry_msgs::msg::TransformStamped current_transform;
-    sensor_msgs::msg::PointCloud2 transformed_cloud;
-    try
+    unsigned expected_array_size = segmentation->width*segmentation->height;
+    if(segmentation->data.size() < expected_array_size ||  segmentation->confidence.size() < expected_array_size)
     {
-        current_transform = tf_->lookupTransform(global_frame_, pointcloud->header.frame_id, pointcloud->header.stamp);
-        tf2::doTransform(*pointcloud, transformed_cloud, current_transform);
-    }
-    catch (tf2::TransformException & ex) {
-        // if an exception occurs, we need to remove the empty observation from the list
-        RCLCPP_ERROR(
-        logger_,
-        "TF Exception that should never happen for sensor frame: %s, cloud frame: %s, %s",
-        pointcloud->header.frame_id.c_str(),
-        global_frame_.c_str(), ex.what());
+        RCLCPP_WARN(logger_, "segmentation arrays have wrong sizes: data->%lu, confidence->%lu, expected->%u", segmentation->data.size(), segmentation->confidence.size(), expected_array_size);
         return;
     }
-    MessagePointcloud message_pc;
-    message_pc.world_frame_pointcloud = transformed_cloud;
-    message_pc.original_pointcloud = *pointcloud;
-    message_pc.message = *segmentation;
-    msg_pc_buffer_->bufferObject(message_pc, segmentation->header.stamp);
+    observation_buffer_->lock();
+    observation_buffer_->bufferCloud(*pointcloud, *segmentation);
+    observation_buffer_->unlock();
+    sgm_debug_pub_->publish(*segmentation);
+    orig_pointcloud_pub_->publish(*pointcloud);
 }
 
 void SemanticSegmentationLayer::reset()
