@@ -69,6 +69,7 @@ void SemanticSegmentationLayer::onInitialize()
         throw std::runtime_error{"Failed to lock node"};
     }
     std::string segmentation_topic, camera_info_topic, pointcloud_topic, sensor_frame;
+    std::vector<std::string> class_types_string;
     bool use_pointcloud;
     double max_lookahead_distance, min_lookahead_distance, observation_keep_time, transform_tolerance, expected_update_rate;
 
@@ -96,6 +97,40 @@ void SemanticSegmentationLayer::onInitialize()
       name_ + "." + "expected_update_rate",
       expected_update_rate);
     node->get_parameter("transform_tolerance", transform_tolerance);
+
+    declareParameter("class_types", rclcpp::ParameterValue(std::vector<std::string>({})));
+    node->get_parameter(name_  + "." + "class_types", class_types_string);
+    if(class_types_string.empty())
+    {
+        RCLCPP_ERROR(logger_, "no class types defined. Segmentation plugin cannot work this way");
+        exit(-1);
+    }
+
+    for(auto& source : class_types_string)
+    {
+        std::vector<int64_t> classes_ids;
+        uint8_t cost;
+        declareParameter(source + ".classes", rclcpp::ParameterValue(std::vector<int64_t>({})));
+        declareParameter(source + ".cost", rclcpp::ParameterValue(0));
+        node->get_parameter(name_  + "." +source + ".classes", classes_ids);
+        if(classes_ids.empty())
+        {
+            RCLCPP_ERROR(logger_, "no classes defined on type %s", source.c_str());
+            continue;
+        }
+        node->get_parameter(name_  + "." +source + ".cost", cost);
+        for(auto& class_id : classes_ids)
+        {
+            class_map_.insert(std::pair<uint8_t, uint8_t>((uint8_t)class_id, cost));
+        }
+    }
+
+    if(class_map_.empty())
+    {
+        RCLCPP_ERROR(logger_, "No classes defined. Segmentation plugin cannot work this way");
+        exit(-1);
+    }
+
 
     global_frame_ = layered_costmap_->getGlobalFrameID();
     rolling_window_ = layered_costmap_->isRolling();
@@ -165,11 +200,18 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
                 continue;
             }
             unsigned int index = getIndex(mx, my);
-            if(*(iter_class+point)!= 1){
-                costmap_[index] = nav2_costmap_2d::LETHAL_OBSTACLE;
-            }else{
-                costmap_[index] = nav2_costmap_2d::FREE_SPACE;
+            uint8_t class_id = *(iter_class+point);
+            if(!class_map_.count(class_id))
+            {
+                RCLCPP_DEBUG(logger_, "Cost for class id %i was not defined, skipping", class_id);
+                continue;
             }
+            costmap_[index] = class_map_[class_id];
+            // if(*(iter_class+point)!= 1){
+            //     costmap_[index] = nav2_costmap_2d::LETHAL_OBSTACLE;
+            // }else{
+            //     costmap_[index] = nav2_costmap_2d::FREE_SPACE;
+            // }
             touch(*(iter_x+point), *(iter_y+point), min_x, min_y, max_x, max_y);
         }
         processed_msgs++;

@@ -52,6 +52,7 @@
 #include "nav2_costmap_2d/object_buffer.hpp"
 #include "nav2_costmap_2d/segmentation_buffer.hpp"
 #include "nav2_costmap_2d/observation.hpp"
+#include "nav2_util/node_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "vision_msgs/msg/semantic_segmentation.hpp"
 #include "opencv2/core.hpp"
@@ -118,6 +119,8 @@ class SemanticSegmentationLayer : public CostmapLayer
     vision_msgs::msg::SemanticSegmentation latest_segmentation_message;
 
     std::string global_frame_;
+
+    std::map<uint8_t, uint8_t> class_map_;
 
     bool rolling_window_;
     bool was_reset_;
