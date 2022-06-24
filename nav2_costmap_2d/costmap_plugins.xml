@@ -16,7 +16,7 @@
       <description>A range-sensor (sonar, IR) based obstacle layer for costmap_2d</description>
     </class>
     <class type="nav2_costmap_2d::SemanticSegmentationLayer" base_class_type="nav2_costmap_2d::Layer">
-      <description>This is an example plugin which puts repeating costs gradients to costmap</description>
+      <description>A plugin for semantic segmentation data produced by RGBD cameras</description>
     </class>
   </library>
 

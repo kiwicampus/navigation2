@@ -22,10 +22,8 @@ find_package(tf2_geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_sensor_msgs REQUIRED)
-find_package(image_geometry REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(angles REQUIRED)
-find_package(backward_ros REQUIRED)
 
 remove_definitions(-DDISABLE_LIBUSB-1.0)
 find_package(Eigen3 REQUIRED)
@@ -51,11 +49,9 @@ add_library(nav2_costmap_2d_core SHARED
   src/costmap_layer.cpp
   src/observation_buffer.cpp
   src/segmentation_buffer.cpp
-  src/ray_caster.cpp
   src/clear_costmap_service.cpp
   src/footprint_collision_checker.cpp
   plugins/costmap_filters/costmap_filter.cpp
-  include/nav2_costmap_2d/object_buffer.hpp
 )
 
 # prevent pluginlib from using boost
@@ -80,7 +76,6 @@ set(dependencies
   tf2_geometry_msgs
   tf2_ros
   tf2_sensor_msgs
-  image_geometry
   visualization_msgs
   angles
 )
