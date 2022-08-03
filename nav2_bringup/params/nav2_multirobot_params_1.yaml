@@ -39,14 +39,6 @@ amcl:
     z_short: 0.05
     scan_topic: scan
 
-amcl_map_client:
-  ros__parameters:
-    use_sim_time: True
-
-amcl_rclcpp_node:
-  ros__parameters:
-    use_sim_time: True
-
 bt_navigator:
   ros__parameters:
     use_sim_time: True
@@ -66,6 +58,7 @@ bt_navigator:
     - nav2_follow_path_action_bt_node
     - nav2_spin_action_bt_node
     - nav2_wait_action_bt_node
+    - nav2_assisted_teleop_action_bt_node
     - nav2_back_up_action_bt_node
     - nav2_drive_on_heading_bt_node
     - nav2_clear_costmap_service_bt_node
@@ -102,9 +95,14 @@ bt_navigator:
     - nav2_wait_cancel_bt_node
     - nav2_spin_cancel_bt_node
     - nav2_back_up_cancel_bt_node
+    - nav2_assisted_teleop_cancel_bt_node
     - nav2_drive_on_heading_cancel_bt_node
 
-bt_navigator_rclcpp_node:
+bt_navigator_navigate_through_poses_rclcpp_node:
+  ros__parameters:
+    use_sim_time: True
+
+bt_navigator_navigate_to_pose_rclcpp_node:
   ros__parameters:
     use_sim_time: True
 
@@ -170,10 +168,6 @@ controller_server:
       RotateToGoal.slowing_factor: 5.0
       RotateToGoal.lookahead_time: -1.0
 
-controller_server_rclcpp_node:
-  ros__parameters:
-    use_sim_time: True
-
 local_costmap:
   local_costmap:
     ros__parameters:
@@ -205,12 +199,6 @@ local_costmap:
         map_subscribe_transient_local: True
       always_send_full_costmap: True
       observation_sources: scan
-  local_costmap_client:
-    ros__parameters:
-      use_sim_time: True
-  local_costmap_rclcpp_node:
-    ros__parameters:
-      use_sim_time: True
 
 global_costmap:
   global_costmap:
@@ -232,12 +220,6 @@ global_costmap:
         map_subscribe_transient_local: True
       always_send_full_costmap: True
       observation_sources: scan
-  global_costmap_client:
-    ros__parameters:
-      use_sim_time: True
-  global_costmap_rclcpp_node:
-    ros__parameters:
-      use_sim_time: True
 
 map_server:
   ros__parameters:
@@ -254,10 +236,6 @@ planner_server:
       tolerance: 0.5
       use_astar: false
       allow_unknown: true
-
-planner_server_rclcpp_node:
-  ros__parameters:
-    use_sim_time: True
 
 smoother_server:
   ros__parameters:
