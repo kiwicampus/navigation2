@@ -19,8 +19,9 @@
 #include <memory>
 #include <string>
 
-#include "geometry_msgs/msg/twist.hpp"
 #include "std_msgs/msg/empty.hpp"
+#include "geometry_msgs/msg/twist.hpp"
+#include "geometry_msgs/msg/twist_stamped.hpp"
 #include "nav2_behaviors/timed_behavior.hpp"
 #include "nav2_msgs/action/assisted_teleop.hpp"
 
@@ -76,7 +77,7 @@ protected:
    * @brief Callback function for velocity subscriber
    * @param msg received Twist message
    */
-  void teleopVelocityCallback(const geometry_msgs::msg::Twist::SharedPtr msg);
+  void teleopVelocityCallback(const geometry_msgs::msg::TwistStamped::SharedPtr msg);
 
   /**
    * @brief Callback function to preempt assisted teleop
@@ -94,7 +95,7 @@ protected:
   bool preempt_teleop_{false};
 
   // subscribers
-  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr vel_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::TwistStamped>::SharedPtr vel_sub_;
   rclcpp::Subscription<std_msgs::msg::Empty>::SharedPtr preempt_teleop_sub_;
 
   rclcpp::Duration command_time_allowance_{0, 0};

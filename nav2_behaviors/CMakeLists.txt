@@ -114,6 +114,7 @@ rclcpp_components_register_nodes(${library_name} "behavior_server::BehaviorServe
 install(TARGETS ${library_name}
                 nav2_spin_behavior
                 nav2_wait_behavior
+                nav2_assisted_teleop_behavior
                 nav2_drive_on_heading_behavior
                 nav2_back_up_behavior
   ARCHIVE DESTINATION lib
