@@ -73,14 +73,14 @@ Status AssistedTeleop::onCycleUpdate()
     feedback_->current_teleop_duration = elasped_time_;
     action_server_->publish_feedback(feedback_);
 
-    rclcpp::Duration time_remaining = end_time_ - steady_clock_.now();
-    if (time_remaining.seconds() < 0.0 && command_time_allowance_.seconds() > 0.0)
-    {
-        stopRobot();
-        RCLCPP_WARN_STREAM(logger_, "Exceeded time allowance before reaching the "
-                                        << behavior_name_.c_str() << "goal - Exiting " << behavior_name_.c_str());
-        return Status::FAILED;
-    }
+    // rclcpp::Duration time_remaining = end_time_ - steady_clock_.now();
+    // if (time_remaining.seconds() < 0.0 && command_time_allowance_.seconds() > 0.0)
+    // {
+    //     stopRobot();
+    //     RCLCPP_WARN_STREAM(logger_, "Exceeded time allowance before reaching the "
+    //                                     << behavior_name_.c_str() << "goal - Exiting " << behavior_name_.c_str());
+    //     return Status::FAILED;
+    // }
 
     // user states that teleop was successful
     if (preempt_teleop_)
