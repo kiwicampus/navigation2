@@ -100,6 +100,8 @@ protected:
 
   rclcpp::Duration command_time_allowance_{0, 0};
   rclcpp::Time end_time_;
+  bool is_infinite = false;
+
 };
 }  // namespace nav2_behaviors
 

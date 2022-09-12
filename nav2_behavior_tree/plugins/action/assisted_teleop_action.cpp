@@ -24,11 +24,15 @@ AssistedTeleopAction::AssistedTeleopAction(const std::string& xml_tag_name, cons
     : BtActionNode<nav2_msgs::action::AssistedTeleop>(xml_tag_name, action_name, conf)
 {
     double time_allowance;
+    bool execute_indefinitely;
     getInput("time_allowance", time_allowance);
     getInput("is_recovery", is_recovery_);
+    getInput("execute_indefinitely", execute_indefinitely);
+
 
     // Populate the input message
     goal_.time_allowance = rclcpp::Duration::from_seconds(time_allowance);
+    goal_.execute_indefinitely = execute_indefinitely;
 }
 
 void AssistedTeleopAction::on_tick()

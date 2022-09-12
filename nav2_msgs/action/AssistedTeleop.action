@@ -1,5 +1,6 @@
 #goal definition
 builtin_interfaces/Duration time_allowance
+bool execute_indefinitely
 ---
 #result definition
 builtin_interfaces/Duration total_elapsed_time

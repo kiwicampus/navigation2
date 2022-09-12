@@ -52,7 +52,8 @@ class AssistedTeleopAction : public BtActionNode<nav2_msgs::action::AssistedTele
     {
         return providedBasicPorts(
             {BT::InputPort<double>("time_allowance", 10.0, "Allowed time for running assisted teleop"),
-             BT::InputPort<bool>("is_recovery", false, "If true the recovery count will be incremented")});
+             BT::InputPort<bool>("is_recovery", false, "If true the recovery count will be incremented"),
+             BT::InputPort<bool>("execute_indefinitely", false, "If true, the behavior will continuously execute.")});
     }
 
    private:
