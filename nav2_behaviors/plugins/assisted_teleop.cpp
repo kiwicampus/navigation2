@@ -74,8 +74,6 @@ Status AssistedTeleop::onCycleUpdate()
     feedback_->current_teleop_duration = elasped_time_;
     action_server_->publish_feedback(feedback_);
 
-    RCLCPP_WARN_STREAM(logger_, "Assisted teleop is running in infinite mode? Let's see: " << is_infinite << ".");
-
     if(!is_infinite){
         rclcpp::Duration time_remaining = end_time_ - steady_clock_.now();
         if (time_remaining.seconds() < 0.0 && command_time_allowance_.seconds() > 0.0)
