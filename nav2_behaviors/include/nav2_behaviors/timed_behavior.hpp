@@ -63,13 +63,12 @@ public:
   TimedBehavior()
   : action_server_(nullptr),
     cycle_frequency_(10.0),
-    enabled_(false)
+    enabled_(false),
+    transform_tolerance_(0.0)
   {
   }
 
-  virtual ~TimedBehavior()
-  {
-  }
+  virtual ~TimedBehavior() = default;
 
   // Derived classes can override this method to catch the command and perform some checks
   // before getting into the main loop. The method will only be called
@@ -93,6 +92,11 @@ public:
   // an opportunity for derived classes to do something on cleanup
   // if they chose
   virtual void onCleanup()
+  {
+  }
+
+  // an opportunity for a derived class to do something on action completion
+  virtual void onActionCompletion()
   {
   }
 
@@ -168,6 +172,7 @@ protected:
   std::string global_frame_;
   std::string robot_base_frame_;
   double transform_tolerance_;
+  rclcpp::Duration elasped_time_{0, 0};
 
   // Clock
   rclcpp::Clock steady_clock_{RCL_STEADY_TIME};
@@ -196,19 +201,6 @@ protected:
       return;
     }
 
-    // Log a message every second
-    {
-      auto node = node_.lock();
-      if (!node) {
-        throw std::runtime_error{"Failed to lock node"};
-      }
-
-      auto timer = node->create_wall_timer(
-        1s,
-        [&]()
-        {RCLCPP_INFO(logger_, "%s running...", behavior_name_.c_str());});
-    }
-
     auto start_time = steady_clock_.now();
 
     // Initialize the ActionT result
@@ -217,11 +209,13 @@ protected:
     rclcpp::WallRate loop_rate(cycle_frequency_);
 
     while (rclcpp::ok()) {
+      elasped_time_ = steady_clock_.now() - start_time;
       if (action_server_->is_cancel_requested()) {
         RCLCPP_INFO(logger_, "Canceling %s", behavior_name_.c_str());
         stopRobot();
-        result->total_elapsed_time = steady_clock_.now() - start_time;
+        result->total_elapsed_time = elasped_time_;
         action_server_->terminate_all(result);
+        onActionCompletion();
         return;
       }
 
@@ -234,6 +228,7 @@ protected:
         stopRobot();
         result->total_elapsed_time = steady_clock_.now() - start_time;
         action_server_->terminate_current(result);
+        onActionCompletion();
         return;
       }
 
@@ -244,12 +239,14 @@ protected:
             "%s completed successfully", behavior_name_.c_str());
           result->total_elapsed_time = steady_clock_.now() - start_time;
           action_server_->succeeded_current(result);
+          onActionCompletion();
           return;
 
         case Status::FAILED:
           RCLCPP_WARN(logger_, "%s failed", behavior_name_.c_str());
           result->total_elapsed_time = steady_clock_.now() - start_time;
           action_server_->terminate_current(result);
+          onActionCompletion();
           return;
 
         case Status::RUNNING:

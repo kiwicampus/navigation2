@@ -41,13 +41,14 @@ public:
    */
   DriveOnHeading()
   : TimedBehavior<ActionT>(),
-    feedback_(std::make_shared<typename ActionT::Feedback>())
+    feedback_(std::make_shared<typename ActionT::Feedback>()),
+    command_x_(0.0),
+    command_speed_(0.0),
+    simulate_ahead_time_(0.0)
   {
   }
 
-
-  ~DriveOnHeading()
-  {}
+  ~DriveOnHeading() = default;
 
   /**
    * @brief Initialization to run behavior
@@ -93,8 +94,6 @@ public:
   Status onCycleUpdate()
   {
     rclcpp::Duration time_remaining = end_time_ - this->steady_clock_.now();
-    RCLCPP_ERROR_STREAM(this->logger_, "Time remaining" << time_remaining.seconds());
-    RCLCPP_ERROR_STREAM(this->logger_, "Time remaining" << command_time_allowance_.seconds());
     if (time_remaining.seconds() < 0.0 && command_time_allowance_.seconds() > 0.0) {
       this->stopRobot();
       RCLCPP_WARN(
@@ -124,7 +123,6 @@ public:
       return Status::SUCCEEDED;
     }
 
-    // TODO(mhpanah): cmd_vel value should be passed as a parameter
     auto cmd_vel = std::make_unique<geometry_msgs::msg::Twist>();
     cmd_vel->linear.y = 0.0;
     cmd_vel->angular.z = 0.0;
@@ -201,9 +199,7 @@ protected:
     node->get_parameter("simulate_ahead_time", simulate_ahead_time_);
   }
 
-  double min_linear_vel_;
-  double max_linear_vel_;
-  double linear_acc_lim_;
+  typename ActionT::Feedback::SharedPtr feedback_;
 
   geometry_msgs::msg::PoseStamped initial_pose_;
   double command_x_;
@@ -211,8 +207,6 @@ protected:
   rclcpp::Duration command_time_allowance_{0, 0};
   rclcpp::Time end_time_;
   double simulate_ahead_time_;
-
-  typename ActionT::Feedback::SharedPtr feedback_;
 };
 
 }  // namespace nav2_behaviors

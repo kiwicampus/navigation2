@@ -28,7 +28,7 @@ using rcl_interfaces::msg::ParameterType;
 using std::placeholders::_1;
 
 WaypointFollower::WaypointFollower(const rclcpp::NodeOptions & options)
-: nav2_util::LifecycleNode("waypoint_follower", "", false, options),
+: nav2_util::LifecycleNode("waypoint_follower", "", options),
   waypoint_task_executor_loader_("nav2_waypoint_follower",
     "nav2_core::WaypointTaskExecutor")
 {
@@ -338,8 +338,8 @@ void WaypointFollower::followWaypointsHandler(
       new_goal = true;
       if (goal_index >= poses.size()) {
         RCLCPP_INFO(
-          get_logger(), "Completed all %i waypoints requested.",
-          static_cast<int>(poses.size()));
+          get_logger(), "Completed all %zu waypoints requested.",
+          goal->poses.size());
         result->missed_waypoints = failed_ids_;
         action_server->succeeded_current(result);
         failed_ids_.clear();
@@ -390,7 +390,7 @@ void WaypointFollower::resultCallback(
       get_logger(),
       "Goal IDs do not match for the current goal handle and received result."
       "Ignoring likely due to receiving result for an old goal.");
-      return;
+    return;
   }
 
   switch (result.code) {

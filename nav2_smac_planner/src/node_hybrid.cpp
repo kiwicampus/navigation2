@@ -381,9 +381,9 @@ inline float distanceHeuristic2D(
   const unsigned int idx, const unsigned int size_x,
   const unsigned int target_x, const unsigned int target_y)
 {
-  return std::hypotf(
-    static_cast<int>(idx % size_x) - static_cast<int>(target_x),
-    static_cast<int>(idx / size_x) - static_cast<int>(target_y));
+  int dx = static_cast<int>(idx % size_x) - static_cast<int>(target_x);
+  int dy = static_cast<int>(idx / size_x) - static_cast<int>(target_y);
+  return std::sqrt(dx * dx + dy * dy);
 }
 
 void NodeHybrid::resetObstacleHeuristic(
@@ -595,7 +595,7 @@ float NodeHybrid::getDistanceHeuristic(
       y_pos * motion_table.num_angle_quantization +
       theta_pos;
     motion_heuristic = dist_heuristic_lookup_table[index];
-  } else if (obstacle_heuristic == 0.0) {
+  } else if (obstacle_heuristic <= 0.0) {
     // If no obstacle heuristic value, must have some H to use
     // In nominal situations, this should never be called.
     static ompl::base::ScopedState<> from(motion_table.state_space), to(motion_table.state_space);
@@ -712,7 +712,12 @@ bool NodeHybrid::backtracePath(CoordinateVector & path)
     current_node = current_node->parent;
   }
 
-  return path.size() > 0;
+  // add the start pose
+  path.push_back(current_node->pose);
+  // Convert angle to radians
+  path.back().theta = NodeHybrid::motion_table.getAngleFromBin(path.back().theta);
+
+  return true;
 }
 
 }  // namespace nav2_smac_planner
