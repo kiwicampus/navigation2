@@ -133,13 +133,14 @@ void SemanticSegmentationLayer::onInitialize()
   rmw_qos_profile_t custom_qos_profile = rmw_qos_profile_sensor_data;
 
   semantic_segmentation_sub_ =
-    std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation>>(
-      rclcpp_node_, segmentation_topic, custom_qos_profile);
-  pointcloud_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2>>(
-    rclcpp_node_, pointcloud_topic, custom_qos_profile);
+    std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation, rclcpp_lifecycle::LifecycleNode>>(
+      node, segmentation_topic, custom_qos_profile);
+  pointcloud_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>(
+    node, pointcloud_topic, custom_qos_profile);
   pointcloud_tf_sub_ = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
-    *pointcloud_sub_, *tf_, global_frame_, 50, rclcpp_node_,
-    tf2::durationFromSec(transform_tolerance));
+    *pointcloud_sub_, *tf_, global_frame_, 50, node->get_node_logging_interface(),
+        node->get_node_clock_interface(),
+        tf2::durationFromSec(transform_tolerance));
   segm_pc_sync_ =
     std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation,
                                                        sensor_msgs::msg::PointCloud2>>(
