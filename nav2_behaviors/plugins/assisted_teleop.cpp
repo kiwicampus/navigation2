@@ -74,7 +74,8 @@ Status AssistedTeleop::onCycleUpdate()
     feedback_->current_teleop_duration = elasped_time_;
     action_server_->publish_feedback(feedback_);
 
-    if(!is_infinite){
+    if (!is_infinite)
+    {
         rclcpp::Duration time_remaining = end_time_ - steady_clock_.now();
         if (time_remaining.seconds() < 0.0 && command_time_allowance_.seconds() > 0.0)
         {
@@ -152,7 +153,8 @@ geometry_msgs::msg::Pose2D AssistedTeleop::projectPose(const geometry_msgs::msg:
     return projected_pose;
 }
 
-void AssistedTeleop::teleopVelocityCallback(const geometry_msgs::msg::TwistStamped::SharedPtr msg) { 
+void AssistedTeleop::teleopVelocityCallback(const geometry_msgs::msg::TwistStamped::SharedPtr msg)
+{
     teleop_twist_.linear = msg->twist.linear;
     teleop_twist_.angular = msg->twist.angular;
 }

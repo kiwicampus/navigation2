@@ -79,6 +79,14 @@ ament_target_dependencies(nav2_back_up_behavior
   ${dependencies}
 )
 
+add_library(nav2_assisted_teleop_behavior SHARED
+  plugins/assisted_teleop.cpp
+)
+
+ament_target_dependencies(nav2_assisted_teleop_behavior
+  ${dependencies}
+)
+
 pluginlib_export_plugin_description_file(nav2_core behavior_plugin.xml)
 
 add_library(nav2_assisted_teleop_behavior SHARED
@@ -132,6 +140,10 @@ install(DIRECTORY include/
 
 install(FILES behavior_plugin.xml
   DESTINATION share/${PROJECT_NAME}
+)
+
+install(DIRECTORY plugins/
+  DESTINATION share/${PROJECT_NAME}/plugins/
 )
 
 if(BUILD_TESTING)

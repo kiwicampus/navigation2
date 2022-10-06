@@ -17,6 +17,7 @@
 
 #include <memory>
 #include <string>
+#include <chrono>
 
 #include "behaviortree_cpp_v3/action_node.h"
 #include "nav2_util/node_utils.hpp"
@@ -25,6 +26,8 @@
 
 namespace nav2_behavior_tree
 {
+
+using namespace std::chrono_literals;  // NOLINT
 
 /**
  * @brief Abstract class representing an action based BT node
@@ -90,7 +93,12 @@ public:
 
     // Make sure the server is actually there before continuing
     RCLCPP_DEBUG(node_->get_logger(), "Waiting for \"%s\" action server", action_name.c_str());
-    action_client_->wait_for_action_server();
+    if (!action_client_->wait_for_action_server(1s)) {
+      RCLCPP_ERROR(
+        node_->get_logger(), "\"%s\" action server not available after waiting for 1 s",
+        action_name.c_str());
+      throw std::runtime_error(std::string("Action server %s not available", action_name.c_str()));
+    }
   }
 
   /**
@@ -132,9 +140,12 @@ public:
 
   /**
    * @brief Function to perform some user-defined operation after a timeout
-   * waiting for a result that hasn't been received yet
+   * waiting for a result that hasn't been received yet. Also provides access to
+   * the latest feedback message from the action server. Feedback will be nullptr
+   * in subsequent calls to this function if no new feedback is received while waiting for a result.
+   * @param feedback shared_ptr to latest feedback message, nullptr if no new feedback was received
    */
-  virtual void on_wait_for_result()
+  virtual void on_wait_for_result(std::shared_ptr<const typename ActionT::Feedback>/*feedback*/)
   {
   }
 
@@ -206,7 +217,10 @@ public:
       // The following code corresponds to the "RUNNING" loop
       if (rclcpp::ok() && !goal_result_available_) {
         // user defined callback. May modify the value of "goal_updated_"
-        on_wait_for_result();
+        on_wait_for_result(feedback_);
+
+        // reset feedback to avoid stale information
+        feedback_.reset();
 
         auto goal_status = goal_handle_->get_status();
         if (goal_updated_ && (goal_status == action_msgs::msg::GoalStatus::STATUS_EXECUTING ||
@@ -340,6 +354,11 @@ protected:
           result_ = result;
         }
       };
+    send_goal_options.feedback_callback =
+      [this](typename rclcpp_action::ClientGoalHandle<ActionT>::SharedPtr,
+        const std::shared_ptr<const typename ActionT::Feedback> feedback) {
+        feedback_ = feedback;
+      };
 
     future_goal_handle_ = std::make_shared<
       std::shared_future<typename rclcpp_action::ClientGoalHandle<ActionT>::SharedPtr>>(
@@ -405,6 +424,9 @@ protected:
   bool goal_result_available_{false};
   typename rclcpp_action::ClientGoalHandle<ActionT>::SharedPtr goal_handle_;
   typename rclcpp_action::ClientGoalHandle<ActionT>::WrappedResult result_;
+
+  // To handle feedback from action server
+  std::shared_ptr<const typename ActionT::Feedback> feedback_;
 
   // The node that will be used for any ROS operations
   rclcpp::Node::SharedPtr node_;

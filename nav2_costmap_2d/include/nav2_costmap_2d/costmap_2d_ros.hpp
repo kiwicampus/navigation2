@@ -76,19 +76,22 @@ public:
    * @brief  Constructor for the wrapper, the node will
    * be placed in a namespace equal to the node's name
    * @param name Name of the costmap ROS node
+   * @param use_sim_time Whether to use simulation or real time
    */
-  explicit Costmap2DROS(const std::string & name);
+  explicit Costmap2DROS(const std::string & name, const bool & use_sim_time = false);
 
   /**
    * @brief  Constructor for the wrapper
    * @param name Name of the costmap ROS node
    * @param parent_namespace Absolute namespace of the node hosting the costmap node
    * @param local_namespace Namespace to append to the parent namespace
+   * @param use_sim_time Whether to use simulation or real time
    */
   explicit Costmap2DROS(
     const std::string & name,
     const std::string & parent_namespace,
-    const std::string & local_namespace);
+    const std::string & local_namespace,
+    const bool & use_sim_time);
 
   /**
    * @brief A destructor
@@ -303,8 +306,6 @@ public:
   double getRobotRadius() {return robot_radius_;}
 
 protected:
-  rclcpp::Node::SharedPtr client_node_;
-
   // Publishers and subscribers
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PolygonStamped>::SharedPtr
     footprint_pub_;
@@ -312,6 +313,11 @@ protected:
 
   rclcpp::Subscription<geometry_msgs::msg::Polygon>::SharedPtr footprint_sub_;
   rclcpp::Subscription<rcl_interfaces::msg::ParameterEvent>::SharedPtr parameter_sub_;
+
+  // Dedicated callback group and executor for tf timer_interface and message fillter
+  rclcpp::CallbackGroup::SharedPtr callback_group_;
+  rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
+  std::unique_ptr<nav2_util::NodeThread> executor_thread_;
 
   // Transform listener
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -329,7 +335,7 @@ protected:
   bool stop_updates_{false};
   bool initialized_{false};
   bool stopped_{true};
-  std::thread * map_update_thread_{nullptr};  ///< @brief A thread for updating the map
+  std::unique_ptr<std::thread> map_update_thread_;  ///< @brief A thread for updating the map
   rclcpp::Time last_publish_{0, 0, RCL_ROS_TIME};
   rclcpp::Duration publish_cycle_{1, 0};
   pluginlib::ClassLoader<Layer> plugin_loader_{"nav2_costmap_2d", "nav2_costmap_2d::Layer"};

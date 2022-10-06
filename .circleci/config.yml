@@ -97,7 +97,7 @@ _commands:
               sha256sum $PWD/lockfile.txt >> lockfile.txt
 
               apt-get update
-              # rosdep update --rosdistro $ROS_DISTRO
+              rosdep update --rosdistro $ROS_DISTRO
               dependencies=$(
                 rosdep install -q -y \
                   --from-paths src \
@@ -447,6 +447,7 @@ _environments:
     RCUTILS_LOGGING_BUFFERED_STREAM: "0"
     RCUTILS_LOGGING_USE_STDOUT: "0"
     DEBIAN_FRONTEND: "noninteractive"
+    PYTHONUNBUFFERED: "1"
 
 executors:
   release_exec:

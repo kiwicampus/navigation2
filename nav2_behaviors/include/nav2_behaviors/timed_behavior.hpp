@@ -59,7 +59,7 @@ class TimedBehavior : public nav2_core::Behavior
     /**
      * @brief A TimedBehavior constructor
      */
-    TimedBehavior() : action_server_(nullptr), cycle_frequency_(10.0), enabled_(false) {}
+    TimedBehavior() : action_server_(nullptr), cycle_frequency_(10.0), enabled_(false), transform_tolerance_(0.0) {}
 
     virtual ~TimedBehavior() {}
 
