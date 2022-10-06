@@ -89,14 +89,6 @@ ament_target_dependencies(nav2_assisted_teleop_behavior
 
 pluginlib_export_plugin_description_file(nav2_core behavior_plugin.xml)
 
-add_library(nav2_assisted_teleop_behavior SHARED
-  plugins/assisted_teleop.cpp
-)
-
-ament_target_dependencies(nav2_assisted_teleop_behavior
-  ${dependencies}
-)
-
 # Library
 add_library(${library_name} SHARED
   src/behavior_server.cpp
