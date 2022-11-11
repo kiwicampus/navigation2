@@ -70,6 +70,7 @@ void SemanticSegmentationLayer::onInitialize()
   std::vector<std::string> class_types_string;
   double max_obstacle_distance, min_obstacle_distance, observation_keep_time, transform_tolerance,
     expected_update_rate;
+  bool track_unknown_space;
 
   declareParameter("enabled", rclcpp::ParameterValue(true));
   declareParameter("combination_method", rclcpp::ParameterValue(1));
@@ -92,6 +93,7 @@ void SemanticSegmentationLayer::onInitialize()
   node->get_parameter(name_ + "." + "observation_persistence", observation_keep_time);
   node->get_parameter(name_ + "." + "sensor_frame", sensor_frame);
   node->get_parameter(name_ + "." + "expected_update_rate", expected_update_rate);
+  node->get_parameter("track_unknown_space", track_unknown_space);
   node->get_parameter("transform_tolerance", transform_tolerance);
   node->get_parameter(name_ + "." + "class_types", class_types_string);
   if (class_types_string.empty())
@@ -127,6 +129,12 @@ void SemanticSegmentationLayer::onInitialize()
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
   rolling_window_ = layered_costmap_->isRolling();
+
+  if (track_unknown_space) {
+    default_value_ = NO_INFORMATION;
+  } else {
+    default_value_ = FREE_SPACE;
+  }
 
   matchSize();
 
@@ -177,13 +185,15 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
   }
   if (!enabled_)
   {
-    current_ = true;
     return;
   }
   std::vector<nav2_costmap_2d::Segmentation> segmentations;
   segmentation_buffer_->lock();
   segmentation_buffer_->getSegmentations(segmentations);
   segmentation_buffer_->unlock();
+
+  current_ = true;
+
   for (auto& segmentation : segmentations)
   {
     if (debug_topics_)
