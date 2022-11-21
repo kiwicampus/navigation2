@@ -66,7 +66,7 @@ void SemanticSegmentationLayer::onInitialize()
   {
     throw std::runtime_error{"Failed to lock node"};
   }
-  std::string segmentation_topic, pointcloud_topic, sensor_frame;
+  std::string segmentation_topic, pointcloud_topic, sensor_frame, topics_string;
   std::vector<std::string> class_types_string;
   double max_obstacle_distance, min_obstacle_distance, observation_keep_time, transform_tolerance,
     expected_update_rate;
@@ -74,58 +74,18 @@ void SemanticSegmentationLayer::onInitialize()
 
   declareParameter("enabled", rclcpp::ParameterValue(true));
   declareParameter("combination_method", rclcpp::ParameterValue(1));
+  declareParameter("observation_sources", rclcpp::ParameterValue(std::string("")));
   declareParameter("publish_debug_topics", rclcpp::ParameterValue(false));
   declareParameter("max_obstacle_distance", rclcpp::ParameterValue(5.0));
   declareParameter("min_obstacle_distance", rclcpp::ParameterValue(0.3));
-  declareParameter("segmentation_topic", rclcpp::ParameterValue(""));
-  declareParameter("pointcloud_topic", rclcpp::ParameterValue(""));
-  declareParameter("observation_persistence", rclcpp::ParameterValue(0.0));
-  declareParameter(name_ + "." + "expected_update_rate", rclcpp::ParameterValue(0.0));
-  declareParameter("class_types", rclcpp::ParameterValue(std::vector<std::string>({})));
 
   node->get_parameter(name_ + "." + "enabled", enabled_);
   node->get_parameter(name_ + "." + "combination_method", combination_method_);
   node->get_parameter(name_ + "." + "publish_debug_topics", debug_topics_);
   node->get_parameter(name_ + "." + "max_obstacle_distance", max_obstacle_distance);
   node->get_parameter(name_ + "." + "min_obstacle_distance", min_obstacle_distance);
-  node->get_parameter(name_ + "." + "segmentation_topic", segmentation_topic);
-  node->get_parameter(name_ + "." + "pointcloud_topic", pointcloud_topic);
-  node->get_parameter(name_ + "." + "observation_persistence", observation_keep_time);
-  node->get_parameter(name_ + "." + "sensor_frame", sensor_frame);
-  node->get_parameter(name_ + "." + "expected_update_rate", expected_update_rate);
   node->get_parameter("track_unknown_space", track_unknown_space);
-  node->get_parameter("transform_tolerance", transform_tolerance);
-  node->get_parameter(name_ + "." + "class_types", class_types_string);
-  if (class_types_string.empty())
-  {
-    RCLCPP_ERROR(logger_, "no class types defined. Segmentation plugin cannot work this way");
-    exit(-1);
-  }
-
-  for (auto& source : class_types_string)
-  {
-    std::vector<std::string> classes_ids;
-    uint8_t cost;
-    declareParameter(source + ".classes", rclcpp::ParameterValue(std::vector<std::string>({})));
-    declareParameter(source + ".cost", rclcpp::ParameterValue(0));
-    node->get_parameter(name_ + "." + source + ".classes", classes_ids);
-    if (classes_ids.empty())
-    {
-      RCLCPP_ERROR(logger_, "no classes defined on type %s", source.c_str());
-      continue;
-    }
-    node->get_parameter(name_ + "." + source + ".cost", cost);
-    for (auto& class_id : classes_ids)
-    {
-      class_map_.insert(std::pair<std::string, uint8_t>(class_id, cost));
-    }
-  }
-
-  if (class_map_.empty())
-  {
-    RCLCPP_ERROR(logger_, "No classes defined. Segmentation plugin cannot work this way");
-    exit(-1);
-  }
+  node->get_parameter("transform_tolerance", transform_tolerance);  
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
   rolling_window_ = layered_costmap_->isRolling();
@@ -138,37 +98,89 @@ void SemanticSegmentationLayer::onInitialize()
 
   matchSize();
 
-  rmw_qos_profile_t custom_qos_profile = rmw_qos_profile_sensor_data;
+  node->get_parameter(name_ + "." + "observation_sources", topics_string);
 
-  semantic_segmentation_sub_ =
-    std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation, rclcpp_lifecycle::LifecycleNode>>(
-      node, segmentation_topic, custom_qos_profile);
-  pointcloud_sub_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>(
-    node, pointcloud_topic, custom_qos_profile);
-  pointcloud_tf_sub_ = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
-    *pointcloud_sub_, *tf_, global_frame_, 50, node->get_node_logging_interface(),
-        node->get_node_clock_interface(),
-        tf2::durationFromSec(transform_tolerance));
-  segm_pc_sync_ =
-    std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation,
-                                                       sensor_msgs::msg::PointCloud2>>(
-      *semantic_segmentation_sub_, *pointcloud_tf_sub_, 100);
-  segm_pc_sync_->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this,
-                                            std::placeholders::_1, std::placeholders::_2));
+  // now we need to split the topics based on whitespace which we can use a stringstream for
+  std::stringstream ss(topics_string);
 
-  segmentation_buffer_ = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
-    node, pointcloud_topic, observation_keep_time, expected_update_rate, max_obstacle_distance,
-    min_obstacle_distance, *tf_, global_frame_, sensor_frame,
-    tf2::durationFromSec(transform_tolerance));
+  std::string source;
 
-  if (debug_topics_)
-  {
-    sgm_debug_pub_ =
-      node->create_publisher<vision_msgs::msg::SemanticSegmentation>("/buffered_segmentation", 1);
-    orig_pointcloud_pub_ =
-      node->create_publisher<sensor_msgs::msg::PointCloud2>("/buffered_pointcloud", 1);
-    proc_pointcloud_pub_ =
-      node->create_publisher<sensor_msgs::msg::PointCloud2>("/processed_pointcloud", 1);
+  while (ss >> source) {
+    declareParameter(source + "." + "segmentation_topic", rclcpp::ParameterValue(""));
+    declareParameter(source + "." + "pointcloud_topic", rclcpp::ParameterValue(""));
+    declareParameter(source + "." + "observation_persistence", rclcpp::ParameterValue(0.0));
+    declareParameter(source + "." + "expected_update_rate", rclcpp::ParameterValue(0.0));
+    declareParameter(source + "." + "class_types", rclcpp::ParameterValue(std::vector<std::string>({})));
+
+    
+    node->get_parameter(name_ + "." + source + "." + "segmentation_topic", segmentation_topic);
+    node->get_parameter(name_ + "." + source + "." + "pointcloud_topic", pointcloud_topic);
+    node->get_parameter(name_ + "." + source + "." + "observation_persistence", observation_keep_time);
+    node->get_parameter(name_ + "." + source + "." + "sensor_frame", sensor_frame);
+    node->get_parameter(name_ + "." + source + "." + "expected_update_rate", expected_update_rate);
+    node->get_parameter(name_ + "." + source + "." + "class_types", class_types_string);
+    if (class_types_string.empty())
+    {
+      RCLCPP_ERROR(logger_, "no class types defined. Segmentation plugin cannot work this way", source);
+      exit(-1);
+    }
+    
+    std::map<std::string, uint8_t> class_map;
+
+    for (auto& class_type : class_types_string)
+    {
+      std::vector<std::string> classes_ids;
+      uint8_t cost;
+      declareParameter(class_type + ".classes", rclcpp::ParameterValue(std::vector<std::string>({})));
+      declareParameter(class_type + ".cost", rclcpp::ParameterValue(0));
+      node->get_parameter(name_ + "." + source + "." + class_type + ".classes", classes_ids);
+      if (classes_ids.empty())
+      {
+        RCLCPP_ERROR(logger_, "no classes defined on type %s", class_type.c_str());
+        continue;
+      }
+      node->get_parameter(name_ + "." + source + "." + class_type + ".cost", cost);
+      for (auto& class_id : classes_ids)
+      {
+        class_map.insert(std::pair<std::string, uint8_t>(class_id, cost));
+      }
+    }
+
+    if (class_map.empty())
+    {
+      RCLCPP_ERROR(logger_, "No classes defined for source %s. Segmentation plugin cannot work this way");
+      exit(-1);
+    }
+
+
+    rmw_qos_profile_t custom_qos_profile = rmw_qos_profile_sensor_data;
+
+    auto semantic_segmentation_sub =
+      std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation, rclcpp_lifecycle::LifecycleNode>>(
+        node, segmentation_topic, custom_qos_profile);
+    auto pointcloud_sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>(
+      node, pointcloud_topic, custom_qos_profile);
+    auto pointcloud_tf_sub = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
+      *pointcloud_sub_, *tf_, global_frame_, 50, node->get_node_logging_interface(),
+          node->get_node_clock_interface(),
+          tf2::durationFromSec(transform_tolerance));
+    auto segm_pc_sync =
+      std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation,
+                                                        sensor_msgs::msg::PointCloud2>>(
+        *semantic_segmentation_sub_, *pointcloud_tf_sub_, 100);
+    segm_pc_sync->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this,
+                                              std::placeholders::_1, std::placeholders::_2));
+
+    segmentation_buffer_ = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
+      node, pointcloud_topic, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
+      min_obstacle_distance, *tf_, global_frame_, sensor_frame,
+      tf2::durationFromSec(transform_tolerance));
+
+    if (debug_topics_)
+    {
+      auto proc_pointcloud_pub =
+        node->create_publisher<sensor_msgs::msg::PointCloud2>("/processed_pointcloud", 1);
+    }
   }
 }
 
@@ -302,11 +314,6 @@ void SemanticSegmentationLayer::syncSegmPointcloudCb(
   segmentation_buffer_->lock();
   segmentation_buffer_->bufferSegmentation(*pointcloud, *segmentation);
   segmentation_buffer_->unlock();
-  if (debug_topics_)
-  {
-    sgm_debug_pub_->publish(*segmentation);
-    orig_pointcloud_pub_->publish(*pointcloud);
-  }
 }
 
 void SemanticSegmentationLayer::reset()

@@ -83,7 +83,7 @@ class SegmentationBuffer
    * @param  tf_tolerance The amount of time to wait for a transform to be available when setting a
    * new global frame
    */
-  SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& parent, std::string topic_name,
+  SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& parent, std::string topic_name, std::map<std::string, uint8_t> class_map
                      double observation_keep_time, double expected_update_rate,
                      double max_lookahead_distance, double min_lookahead_distance,
                      tf2_ros::Buffer& tf2_buffer, std::string global_frame,
@@ -108,6 +108,12 @@ class SegmentationBuffer
    * @param  segmentations The vector to be filled
    */
   void getSegmentations(std::vector<Segmentation>& segmentations);
+
+  /**
+   * @brief  gets the class map associated with the segmentations stored in the buffer
+   * @return the class map
+   */
+  std::map<std::string, uint8_t> getClassMap();
 
   /**
    * @brief  Check if the segmentation buffer is being update at its expected rate
@@ -139,6 +145,7 @@ class SegmentationBuffer
   rclcpp::Clock::SharedPtr clock_;
   rclcpp::Logger logger_{rclcpp::get_logger("nav2_costmap_2d")};
   tf2_ros::Buffer& tf2_buffer_;
+  std::map<std::string, uint8_t> class_map_;
   const rclcpp::Duration observation_keep_time_;
   const rclcpp::Duration expected_update_rate_;
   rclcpp::Time last_updated_;

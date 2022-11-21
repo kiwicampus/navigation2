@@ -48,12 +48,13 @@ using namespace std::chrono_literals;
 
 namespace nav2_costmap_2d {
 SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& parent,
-                                       std::string topic_name, double observation_keep_time,
+                                       std::string topic_name, std::map<std::string, uint8_t> class_map, double observation_keep_time,
                                        double expected_update_rate, double max_lookahead_distance,
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
                                        tf2::Duration tf_tolerance)
   : tf2_buffer_(tf2_buffer)
+  , class_map_(class_map)
   , observation_keep_time_(rclcpp::Duration::from_seconds(observation_keep_time))
   , expected_update_rate_(rclcpp::Duration::from_seconds(expected_update_rate))
   , global_frame_(global_frame)
@@ -204,6 +205,11 @@ void SegmentationBuffer::getSegmentations(std::vector<Segmentation>& segmentatio
     segmentations.push_back(*obs_it);
   }
   segmentation_list_.clear();
+}
+
+std::map<std::string, uint8_t> SegmentationBuffer::getClassMap()
+{
+  return class_map_;
 }
 
 void SegmentationBuffer::purgeStaleSegmentations()
