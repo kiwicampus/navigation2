@@ -20,6 +20,7 @@
 
 int main(int argc, char ** argv)
 {
+  //this is a test
   rclcpp::init(argc, argv);
   auto recoveries_node = std::make_shared<behavior_server::BehaviorServer>();
 
