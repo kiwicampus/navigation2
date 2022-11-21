@@ -237,6 +237,7 @@
     </Condition>
 
     <!-- ############################### CONTROL NODES ################################ -->
+     <!-- ############################### testico NODES ################################ -->
     <Control ID="PipelineSequence"/>
 
     <Control ID="RecoveryNode">
