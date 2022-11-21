@@ -82,7 +82,7 @@ class Segmentation
    * raytracing
    */
   Segmentation(geometry_msgs::msg::Point& origin, const sensor_msgs::msg::PointCloud2& cloud,
-               std::map<uint16_t, std::string> class_map)
+               std::map<uint16_t, uint8_t> class_map)
     : origin_(origin), cloud_(new sensor_msgs::msg::PointCloud2(cloud)), class_map_(class_map)
   {
   }
@@ -113,7 +113,7 @@ class Segmentation
 
   geometry_msgs::msg::Point origin_;
   sensor_msgs::msg::PointCloud2* cloud_;
-  std::map<uint16_t, std::string> class_map_;
+  std::map<uint16_t, uint8_t> class_map_; // contains class_id->cost relation
 };
 
 }  // namespace nav2_costmap_2d

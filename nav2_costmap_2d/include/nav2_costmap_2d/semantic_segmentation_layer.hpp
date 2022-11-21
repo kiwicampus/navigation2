@@ -111,10 +111,15 @@ class SemanticSegmentationLayer : public CostmapLayer
    */
   virtual bool isClearable() { return true; }
 
+  bool getSegmentations(
+    std::vector<nav2_costmap_2d::Segmentation> & segmentations) const;
+
+
  private:
   void syncSegmPointcloudCb(
     const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation>& segmentation,
-    const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud);
+    const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
+    const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer> & buffer);
 
   std::vector<std::shared_ptr<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation, rclcpp_lifecycle::LifecycleNode>>>
     semantic_segmentation_subs_;
@@ -122,10 +127,10 @@ class SemanticSegmentationLayer : public CostmapLayer
   std::vector<std::shared_ptr<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation,
                                                     sensor_msgs::msg::PointCloud2>>>
     segm_pc_notifiers_;
-  std::vector<std::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>> pointcloud_tf_sub_;
+  std::vector<std::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>> pointcloud_tf_subs_;
 
   // debug publishers
-  std::vector<std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::PointCloud2>>> proc_pointcloud_pubs_;
+  std::map<std::string, std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::PointCloud2>>> proc_pointcloud_pubs_map_;
 
   std::vector<std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>> segmentation_buffers_;
 
@@ -135,7 +140,6 @@ class SemanticSegmentationLayer : public CostmapLayer
 
   bool rolling_window_;
   bool was_reset_;
-  bool debug_topics_;
   int combination_method_;
 };
 

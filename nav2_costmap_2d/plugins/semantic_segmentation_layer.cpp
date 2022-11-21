@@ -81,7 +81,6 @@ void SemanticSegmentationLayer::onInitialize()
 
   node->get_parameter(name_ + "." + "enabled", enabled_);
   node->get_parameter(name_ + "." + "combination_method", combination_method_);
-  node->get_parameter(name_ + "." + "publish_debug_topics", debug_topics_);
   node->get_parameter(name_ + "." + "max_obstacle_distance", max_obstacle_distance);
   node->get_parameter(name_ + "." + "min_obstacle_distance", min_obstacle_distance);
   node->get_parameter("track_unknown_space", track_unknown_space);
@@ -121,7 +120,7 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + source + "." + "class_types", class_types_string);
     if (class_types_string.empty())
     {
-      RCLCPP_ERROR(logger_, "no class types defined. Segmentation plugin cannot work this way", source);
+      RCLCPP_ERROR(logger_, "no class types defined for source %s. Segmentation plugin cannot work this way", source.c_str());
       exit(-1);
     }
     
@@ -131,8 +130,8 @@ void SemanticSegmentationLayer::onInitialize()
     {
       std::vector<std::string> classes_ids;
       uint8_t cost;
-      declareParameter(class_type + ".classes", rclcpp::ParameterValue(std::vector<std::string>({})));
-      declareParameter(class_type + ".cost", rclcpp::ParameterValue(0));
+      declareParameter(source + "." + class_type + ".classes", rclcpp::ParameterValue(std::vector<std::string>({})));
+      declareParameter(source + "." + class_type + ".cost", rclcpp::ParameterValue(0));
       node->get_parameter(name_ + "." + source + "." + class_type + ".classes", classes_ids);
       if (classes_ids.empty())
       {
@@ -148,39 +147,44 @@ void SemanticSegmentationLayer::onInitialize()
 
     if (class_map.empty())
     {
-      RCLCPP_ERROR(logger_, "No classes defined for source %s. Segmentation plugin cannot work this way");
+      RCLCPP_ERROR(logger_, "No classes defined for source %s. Segmentation plugin cannot work this way", source.c_str());
       exit(-1);
     }
 
 
     rmw_qos_profile_t custom_qos_profile = rmw_qos_profile_sensor_data;
 
-    auto semantic_segmentation_sub =
-      std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation, rclcpp_lifecycle::LifecycleNode>>(
-        node, segmentation_topic, custom_qos_profile);
-    auto pointcloud_sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>(
-      node, pointcloud_topic, custom_qos_profile);
-    auto pointcloud_tf_sub = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
-      *pointcloud_sub_, *tf_, global_frame_, 50, node->get_node_logging_interface(),
-          node->get_node_clock_interface(),
-          tf2::durationFromSec(transform_tolerance));
-    auto segm_pc_sync =
-      std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation,
-                                                        sensor_msgs::msg::PointCloud2>>(
-        *semantic_segmentation_sub_, *pointcloud_tf_sub_, 100);
-    segm_pc_sync->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this,
-                                              std::placeholders::_1, std::placeholders::_2));
-
-    segmentation_buffer_ = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
+    auto segmentation_buffer = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
       node, pointcloud_topic, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
       min_obstacle_distance, *tf_, global_frame_, sensor_frame,
       tf2::durationFromSec(transform_tolerance));
 
-    if (debug_topics_)
-    {
-      auto proc_pointcloud_pub =
-        node->create_publisher<sensor_msgs::msg::PointCloud2>("/processed_pointcloud", 1);
-    }
+    segmentation_buffers_.push_back(segmentation_buffer);
+    
+
+    auto semantic_segmentation_sub =
+      std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation, rclcpp_lifecycle::LifecycleNode>>(
+        node, segmentation_topic, custom_qos_profile);
+    semantic_segmentation_subs_.push_back(semantic_segmentation_sub);
+
+    auto pointcloud_sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>(
+      node, pointcloud_topic, custom_qos_profile);
+    pointcloud_subs_.push_back(pointcloud_sub);
+
+    auto pointcloud_tf_sub = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
+      *pointcloud_sub, *tf_, global_frame_, 50, node->get_node_logging_interface(),
+          node->get_node_clock_interface(),
+          tf2::durationFromSec(transform_tolerance));
+    pointcloud_tf_subs_.push_back(pointcloud_tf_sub);
+    
+    auto segm_pc_sync =
+      std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation,
+                                                        sensor_msgs::msg::PointCloud2>>(
+        *semantic_segmentation_sub, *pointcloud_tf_sub, 100);
+    segm_pc_sync->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this,
+                                              std::placeholders::_1, std::placeholders::_2, segmentation_buffer));
+
+    segm_pc_notifiers_.push_back(segm_pc_sync);
   }
 }
 
@@ -200,18 +204,13 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
     return;
   }
   std::vector<nav2_costmap_2d::Segmentation> segmentations;
-  segmentation_buffer_->lock();
-  segmentation_buffer_->getSegmentations(segmentations);
-  segmentation_buffer_->unlock();
+  getSegmentations(segmentations);
+
 
   current_ = true;
 
   for (auto& segmentation : segmentations)
   {
-    if (debug_topics_)
-    {
-      proc_pointcloud_pub_->publish(*segmentation.cloud_);
-    }
     sensor_msgs::PointCloud2ConstIterator<float> iter_x(*segmentation.cloud_, "x");
     sensor_msgs::PointCloud2ConstIterator<float> iter_y(*segmentation.cloud_, "y");
     sensor_msgs::PointCloud2ConstIterator<uint8_t> iter_class(*segmentation.cloud_, "class");
@@ -228,12 +227,12 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
       }
       unsigned int index = getIndex(mx, my);
       uint8_t class_id = *(iter_class + point);
-      if (!class_map_.count(segmentation.class_map_[class_id]))
+      if (!segmentation.class_map_.count(class_id))
       {
         RCLCPP_DEBUG(logger_, "Cost for class id %i was not defined, skipping", class_id);
         continue;
       }
-      costmap_[index] = class_map_[segmentation.class_map_[class_id]];
+      costmap_[index] = segmentation.class_map_[class_id];
       touch(*(iter_x + point), *(iter_y + point), min_x, min_y, max_x, max_y);
     }
   }
@@ -285,7 +284,8 @@ void SemanticSegmentationLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_g
 
 void SemanticSegmentationLayer::syncSegmPointcloudCb(
   const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation>& segmentation,
-  const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud)
+  const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
+  const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer> & buffer)
 {
   if (segmentation->width * segmentation->height != pointcloud->width * pointcloud->height)
   {
@@ -311,9 +311,9 @@ void SemanticSegmentationLayer::syncSegmPointcloudCb(
     RCLCPP_WARN(logger_, "Classs map is empty. Will not buffer message");
     return;
   }
-  segmentation_buffer_->lock();
-  segmentation_buffer_->bufferSegmentation(*pointcloud, *segmentation);
-  segmentation_buffer_->unlock();
+  buffer->lock();
+  buffer->bufferSegmentation(*pointcloud, *segmentation);
+  buffer->unlock();
 }
 
 void SemanticSegmentationLayer::reset()
@@ -322,6 +322,20 @@ void SemanticSegmentationLayer::reset()
   current_ = false;
   was_reset_ = true;
 }
+
+bool SemanticSegmentationLayer::getSegmentations(
+    std::vector<nav2_costmap_2d::Segmentation> & segmentations) const
+    {
+      bool current = true;
+      // get the marking observations
+      for (unsigned int i = 0; i < segmentation_buffers_.size(); ++i) {
+        segmentation_buffers_[i]->lock();
+        segmentation_buffers_[i]->getSegmentations(segmentations);
+        current = segmentation_buffers_[i]->isCurrent() && current;
+        segmentation_buffers_[i]->unlock();
+      }
+      return current;
+    }
 
 }  // namespace nav2_costmap_2d
 

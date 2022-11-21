@@ -48,13 +48,13 @@ using namespace std::chrono_literals;
 
 namespace nav2_costmap_2d {
 SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& parent,
-                                       std::string topic_name, std::map<std::string, uint8_t> class_map, double observation_keep_time,
+                                       std::string topic_name, std::map<std::string, uint8_t> class_names_cost_map, double observation_keep_time,
                                        double expected_update_rate, double max_lookahead_distance,
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
                                        tf2::Duration tf_tolerance)
   : tf2_buffer_(tf2_buffer)
-  , class_map_(class_map)
+  , class_names_cost_map_(class_names_cost_map)
   , observation_keep_time_(rclcpp::Duration::from_seconds(observation_keep_time))
   , expected_update_rate_(rclcpp::Duration::from_seconds(expected_update_rate))
   , global_frame_(global_frame)
@@ -170,10 +170,10 @@ void SegmentationBuffer::bufferSegmentation(
     segmentation_cloud.header.frame_id = global_frame_cloud.header.frame_id;
 
     // create tje class map from the classes contained on the segmentation message
-    std::map<uint16_t, std::string>& segmentation_class_map = segmentation_list_.front().class_map_;
+    std::map<uint16_t, uint8_t>& segmentation_class_map = segmentation_list_.front().class_map_;
     for (auto& semantic_class : segmentation.class_map)
     {
-      segmentation_class_map[semantic_class.class_id] = semantic_class.class_name;
+      segmentation_class_map[semantic_class.class_id] = class_names_cost_map_[semantic_class.class_name];
     }
   } catch (tf2::TransformException& ex)
   {
@@ -209,7 +209,7 @@ void SegmentationBuffer::getSegmentations(std::vector<Segmentation>& segmentatio
 
 std::map<std::string, uint8_t> SegmentationBuffer::getClassMap()
 {
-  return class_map_;
+  return class_names_cost_map_;
 }
 
 void SegmentationBuffer::purgeStaleSegmentations()
