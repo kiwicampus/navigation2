@@ -166,23 +166,32 @@ void SemanticSegmentationLayer::onInitialize()
       std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation, rclcpp_lifecycle::LifecycleNode>>(
         node, segmentation_topic, custom_qos_profile);
     semantic_segmentation_subs_.push_back(semantic_segmentation_sub);
+    // semantic_segmentation_sub->registerCallback([&](std::shared_ptr<const vision_msgs::msg::SemanticSegmentation> /*msg*/){
+    //   std::cout << "got sgm" << std::endl;
+    // });
 
     auto pointcloud_sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>(
       node, pointcloud_topic, custom_qos_profile);
     pointcloud_subs_.push_back(pointcloud_sub);
+    // pointcloud_sub->registerCallback([&](std::shared_ptr<const sensor_msgs::msg::PointCloud2> /*msg*/){
+    //   std::cout << "got pc" << std::endl;
+    // });
 
     auto pointcloud_tf_sub = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
-      *pointcloud_sub, *tf_, global_frame_, 50, node->get_node_logging_interface(),
+      *pointcloud_subs_.back(), *tf_, global_frame_, 1000, node->get_node_logging_interface(),
           node->get_node_clock_interface(),
           tf2::durationFromSec(transform_tolerance));
+    // pointcloud_tf_sub->registerCallback([&](std::shared_ptr<const sensor_msgs::msg::PointCloud2> /*msg*/){
+    //   std::cout << "got pc tf" << std::endl;
+    // });
     pointcloud_tf_subs_.push_back(pointcloud_tf_sub);
     
     auto segm_pc_sync =
       std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation,
                                                         sensor_msgs::msg::PointCloud2>>(
-        *semantic_segmentation_sub, *pointcloud_tf_sub, 100);
+        *semantic_segmentation_subs_.back(), *pointcloud_tf_subs_.back(), 1000);
     segm_pc_sync->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this,
-                                              std::placeholders::_1, std::placeholders::_2, segmentation_buffer));
+                                              std::placeholders::_1, std::placeholders::_2, segmentation_buffers_.back()));
 
     segm_pc_notifiers_.push_back(segm_pc_sync);
   }
@@ -308,12 +317,13 @@ void SemanticSegmentationLayer::syncSegmPointcloudCb(
   }
   if (segmentation->class_map.size() == 0)
   {
-    RCLCPP_WARN(logger_, "Classs map is empty. Will not buffer message");
+    RCLCPP_WARN(logger_, "Class map is empty. Will not buffer message");
     return;
   }
   buffer->lock();
   buffer->bufferSegmentation(*pointcloud, *segmentation);
   buffer->unlock();
+  // std::cout << "buffered cloud from " << buffer->getPoincloudTopic() << std::endl;
 }
 
 void SemanticSegmentationLayer::reset()
@@ -331,6 +341,7 @@ bool SemanticSegmentationLayer::getSegmentations(
       for (unsigned int i = 0; i < segmentation_buffers_.size(); ++i) {
         segmentation_buffers_[i]->lock();
         segmentation_buffers_[i]->getSegmentations(segmentations);
+        // std::cout << segmentation_buffers_[i]->getPoincloudTopic() << " " << segmentations.size() << std::endl;
         current = segmentation_buffers_[i]->isCurrent() && current;
         segmentation_buffers_[i]->unlock();
       }

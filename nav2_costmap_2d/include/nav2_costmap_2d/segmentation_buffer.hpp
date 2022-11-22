@@ -136,6 +136,11 @@ class SegmentationBuffer
    */
   void resetLastUpdated();
 
+  /**
+   * @brief Reset last updated timestamp
+   */
+  std::string getPoincloudTopic(){ return topic_name_; }
+
  private:
   /**
    * @brief  Removes any stale segmentations from the buffer list
