@@ -76,13 +76,9 @@ void SemanticSegmentationLayer::onInitialize()
   declareParameter("combination_method", rclcpp::ParameterValue(1));
   declareParameter("observation_sources", rclcpp::ParameterValue(std::string("")));
   declareParameter("publish_debug_topics", rclcpp::ParameterValue(false));
-  declareParameter("max_obstacle_distance", rclcpp::ParameterValue(5.0));
-  declareParameter("min_obstacle_distance", rclcpp::ParameterValue(0.3));
 
   node->get_parameter(name_ + "." + "enabled", enabled_);
   node->get_parameter(name_ + "." + "combination_method", combination_method_);
-  node->get_parameter(name_ + "." + "max_obstacle_distance", max_obstacle_distance);
-  node->get_parameter(name_ + "." + "min_obstacle_distance", min_obstacle_distance);
   node->get_parameter("track_unknown_space", track_unknown_space);
   node->get_parameter("transform_tolerance", transform_tolerance);  
 
@@ -108,9 +104,11 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "segmentation_topic", rclcpp::ParameterValue(""));
     declareParameter(source + "." + "pointcloud_topic", rclcpp::ParameterValue(""));
     declareParameter(source + "." + "observation_persistence", rclcpp::ParameterValue(0.0));
+    declareParameter(source + "." + "sensor_frame", rclcpp::ParameterValue(""));
     declareParameter(source + "." + "expected_update_rate", rclcpp::ParameterValue(0.0));
     declareParameter(source + "." + "class_types", rclcpp::ParameterValue(std::vector<std::string>({})));
-
+    declareParameter(source + "." + "max_obstacle_distance", rclcpp::ParameterValue(5.0));
+    declareParameter(source + "." + "min_obstacle_distance", rclcpp::ParameterValue(0.3));
     
     node->get_parameter(name_ + "." + source + "." + "segmentation_topic", segmentation_topic);
     node->get_parameter(name_ + "." + source + "." + "pointcloud_topic", pointcloud_topic);
@@ -118,6 +116,8 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + source + "." + "sensor_frame", sensor_frame);
     node->get_parameter(name_ + "." + source + "." + "expected_update_rate", expected_update_rate);
     node->get_parameter(name_ + "." + source + "." + "class_types", class_types_string);
+    node->get_parameter(name_ + "." + source + "." + "max_obstacle_distance", max_obstacle_distance);
+    node->get_parameter(name_ + "." + source + "." + "min_obstacle_distance", min_obstacle_distance);
     if (class_types_string.empty())
     {
       RCLCPP_ERROR(logger_, "no class types defined for source %s. Segmentation plugin cannot work this way", source.c_str());
