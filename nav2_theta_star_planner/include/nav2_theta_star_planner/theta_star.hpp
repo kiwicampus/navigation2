@@ -24,6 +24,8 @@
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 
 const double INF_COST = DBL_MAX;
+const int UNKNOWN_COST = 255;
+const int OBS_COST = 254;
 const int LETHAL_COST = 252;
 const int UNKNOWN_COST = 255;
 
@@ -94,7 +96,9 @@ public:
    */
   inline bool isSafe(const int & cx, const int & cy) const
   {
-    return (costmap_->getCost(cx, cy) == UNKNOWN_COST && allow_unknown_) || costmap_->getCost(cx, cy) < LETHAL_COST;
+    return (costmap_->getCost(
+             cx,
+             cy) == UNKNOWN_COST && allow_unknown_) || costmap_->getCost(cx, cy) < LETHAL_COST;
   }
 
   /**
@@ -189,6 +193,9 @@ protected:
   {
     double curr_cost = getCost(cx, cy);
     if ((costmap_->getCost(cx, cy) == UNKNOWN_COST && allow_unknown_) || curr_cost < LETHAL_COST) {
+      if (costmap_->getCost(cx, cy) == UNKNOWN_COST) {
+        curr_cost = OBS_COST - 1;
+      }
       cost += w_traversal_cost_ * curr_cost * curr_cost / LETHAL_COST / LETHAL_COST;
       return true;
     } else {

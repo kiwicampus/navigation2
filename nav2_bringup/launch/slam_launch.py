@@ -79,26 +79,24 @@ def generate_launch_description():
 
     # Nodes launching commands
 
-    start_map_server = GroupAction(
-        actions=[
-            SetParameter("use_sim_time", use_sim_time),
-            Node(
-                package='nav2_map_server',
-                executable='map_saver_server',
-                output='screen',
-                respawn=use_respawn,
-                respawn_delay=2.0,
-                arguments=['--ros-args', '--log-level', log_level],
-                parameters=[configured_params]),
-            Node(
-                package='nav2_lifecycle_manager',
-                executable='lifecycle_manager',
-                name='lifecycle_manager_slam',
-                output='screen',
-                arguments=['--ros-args', '--log-level', log_level],
-                parameters=[{'autostart': autostart},
-                            {'node_names': lifecycle_nodes}])
-        ])
+    start_map_saver_server_cmd = Node(
+            package='nav2_map_server',
+            executable='map_saver_server',
+            output='screen',
+            respawn=use_respawn,
+            respawn_delay=2.0,
+            arguments=['--ros-args', '--log-level', log_level],
+            parameters=[configured_params])
+
+    start_lifecycle_manager_cmd = Node(
+            package='nav2_lifecycle_manager',
+            executable='lifecycle_manager',
+            name='lifecycle_manager_slam',
+            output='screen',
+            arguments=['--ros-args', '--log-level', log_level],
+            parameters=[{'use_sim_time': use_sim_time},
+                        {'autostart': autostart},
+                        {'node_names': lifecycle_nodes}])
 
     # If the provided param file doesn't have slam_toolbox params, we must remove the 'params_file'
     # LaunchConfiguration, or it will be passed automatically to slam_toolbox and will not load
@@ -128,7 +126,8 @@ def generate_launch_description():
     ld.add_action(declare_log_level_cmd)
 
     # Running Map Saver Server
-    ld.add_action(start_map_server)
+    ld.add_action(start_map_saver_server_cmd)
+    ld.add_action(start_lifecycle_manager_cmd)
 
     # Running SLAM Toolbox (Only one of them will be run)
     ld.add_action(start_slam_toolbox_cmd)

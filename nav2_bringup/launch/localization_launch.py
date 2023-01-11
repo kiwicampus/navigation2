@@ -133,7 +133,8 @@ def generate_launch_description():
                 name='lifecycle_manager_localization',
                 output='screen',
                 arguments=['--ros-args', '--log-level', log_level],
-                parameters=[{'autostart': autostart},
+                parameters=[{'use_sim_time': use_sim_time},
+                            {'autostart': autostart},
                             {'node_names': lifecycle_nodes}])
         ]
     )
