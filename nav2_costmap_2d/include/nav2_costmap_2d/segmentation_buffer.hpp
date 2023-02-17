@@ -83,7 +83,7 @@ class SegmentationBuffer
    * @param  tf_tolerance The amount of time to wait for a transform to be available when setting a
    * new global frame
    */
-  SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& parent, std::string topic_name, std::map<std::string, uint8_t> class_names_cost_map,
+  SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& parent, std::string buffer_source, std::vector<std::string> class_types, std::map<std::string, uint8_t> class_names_cost_map,
                      double observation_keep_time, double expected_update_rate,
                      double max_lookahead_distance, double min_lookahead_distance,
                      tf2_ros::Buffer& tf2_buffer, std::string global_frame,
@@ -139,7 +139,14 @@ class SegmentationBuffer
   /**
    * @brief Reset last updated timestamp
    */
-  std::string getPoincloudTopic(){ return topic_name_; }
+  std::string getBufferSource(){ return buffer_source_; }
+  std::vector<std::string> getClassTypes(){ return class_types_; }
+
+  void setMinObstacleDistance(double distance) {sq_min_lookahead_distance_ = pow(distance,2);}
+
+  void setMaxObstacleDistance(double distance) {sq_max_lookahead_distance_ = pow(distance,2);}
+
+  void updateClassMap(std::string new_class, uint8_t new_cost);
 
  private:
   /**
@@ -150,6 +157,7 @@ class SegmentationBuffer
   rclcpp::Clock::SharedPtr clock_;
   rclcpp::Logger logger_{rclcpp::get_logger("nav2_costmap_2d")};
   tf2_ros::Buffer& tf2_buffer_;
+  std::vector<std::string> class_types_;
   std::map<std::string, uint8_t> class_names_cost_map_;
   const rclcpp::Duration observation_keep_time_;
   const rclcpp::Duration expected_update_rate_;
@@ -157,7 +165,7 @@ class SegmentationBuffer
   std::string global_frame_;
   std::string sensor_frame_;
   std::list<Segmentation> segmentation_list_;
-  std::string topic_name_;
+  std::string buffer_source_;
   std::recursive_mutex lock_;  ///< @brief A lock for accessing data in callbacks safely
   double sq_max_lookahead_distance_;
   double sq_min_lookahead_distance_;

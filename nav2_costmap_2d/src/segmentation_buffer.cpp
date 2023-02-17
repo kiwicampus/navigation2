@@ -48,18 +48,19 @@ using namespace std::chrono_literals;
 
 namespace nav2_costmap_2d {
 SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& parent,
-                                       std::string topic_name, std::map<std::string, uint8_t> class_names_cost_map, double observation_keep_time,
+                                       std::string buffer_source, std::vector<std::string> class_types, std::map<std::string, uint8_t> class_names_cost_map, double observation_keep_time,
                                        double expected_update_rate, double max_lookahead_distance,
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
                                        tf2::Duration tf_tolerance)
   : tf2_buffer_(tf2_buffer)
+  , class_types_(class_types)
   , class_names_cost_map_(class_names_cost_map)
   , observation_keep_time_(rclcpp::Duration::from_seconds(observation_keep_time))
   , expected_update_rate_(rclcpp::Duration::from_seconds(expected_update_rate))
   , global_frame_(global_frame)
   , sensor_frame_(sensor_frame)
-  , topic_name_(topic_name)
+  , buffer_source_(buffer_source)
   , sq_max_lookahead_distance_(std::pow(max_lookahead_distance, 2))
   , sq_min_lookahead_distance_(std::pow(min_lookahead_distance, 2))
   , tf_tolerance_(tf_tolerance)
@@ -239,6 +240,11 @@ void SegmentationBuffer::purgeStaleSegmentations()
   }
 }
 
+void SegmentationBuffer::updateClassMap(std::string new_class, uint8_t new_cost)
+{
+  class_names_cost_map_[new_class] = new_cost;
+}
+
 bool SegmentationBuffer::isCurrent() const
 {
   if (expected_update_rate_ == rclcpp::Duration(0.0s))
@@ -252,7 +258,7 @@ bool SegmentationBuffer::isCurrent() const
     RCLCPP_WARN(logger_,
                 "The %s segmentation buffer has not been updated for %.2f seconds, "
                 "and it should be updated every %.2f seconds.",
-                topic_name_.c_str(), (clock_->now() - last_updated_).seconds(),
+                buffer_source_.c_str(), (clock_->now() - last_updated_).seconds(),
                 expected_update_rate_.seconds());
   }
   return current;

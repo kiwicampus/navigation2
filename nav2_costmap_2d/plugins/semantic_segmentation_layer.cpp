@@ -66,7 +66,7 @@ void SemanticSegmentationLayer::onInitialize()
   {
     throw std::runtime_error{"Failed to lock node"};
   }
-  std::string segmentation_topic, pointcloud_topic, sensor_frame, topics_string;
+  std::string segmentation_topic, pointcloud_topic, sensor_frame;
   std::vector<std::string> class_types_string;
   double max_obstacle_distance, min_obstacle_distance, observation_keep_time, transform_tolerance,
     expected_update_rate;
@@ -93,10 +93,10 @@ void SemanticSegmentationLayer::onInitialize()
 
   matchSize();
 
-  node->get_parameter(name_ + "." + "observation_sources", topics_string);
+  node->get_parameter(name_ + "." + "observation_sources", topics_string_);
 
   // now we need to split the topics based on whitespace which we can use a stringstream for
-  std::stringstream ss(topics_string);
+  std::stringstream ss(topics_string_);
 
   std::string source;
 
@@ -155,7 +155,7 @@ void SemanticSegmentationLayer::onInitialize()
     rmw_qos_profile_t custom_qos_profile = rmw_qos_profile_sensor_data;
 
     auto segmentation_buffer = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
-      node, pointcloud_topic, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
+      node, source, class_types_string, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
       min_obstacle_distance, *tf_, global_frame_, sensor_frame,
       tf2::durationFromSec(transform_tolerance));
 
@@ -195,6 +195,12 @@ void SemanticSegmentationLayer::onInitialize()
 
     segm_pc_notifiers_.push_back(segm_pc_sync);
   }
+
+  dyn_params_handler_ = node->add_on_set_parameters_callback(
+    std::bind(
+      &SemanticSegmentationLayer::dynamicParametersCallback,
+      this,
+      std::placeholders::_1));
 }
 
 // The method is called to ask the plugin: which area of costmap it needs to update.
@@ -323,7 +329,6 @@ void SemanticSegmentationLayer::syncSegmPointcloudCb(
   buffer->lock();
   buffer->bufferSegmentation(*pointcloud, *segmentation);
   buffer->unlock();
-  // std::cout << "buffered cloud from " << buffer->getPoincloudTopic() << std::endl;
 }
 
 void SemanticSegmentationLayer::reset()
@@ -341,12 +346,74 @@ bool SemanticSegmentationLayer::getSegmentations(
       for (unsigned int i = 0; i < segmentation_buffers_.size(); ++i) {
         segmentation_buffers_[i]->lock();
         segmentation_buffers_[i]->getSegmentations(segmentations);
-        // std::cout << segmentation_buffers_[i]->getPoincloudTopic() << " " << segmentations.size() << std::endl;
         current = segmentation_buffers_[i]->isCurrent() && current;
         segmentation_buffers_[i]->unlock();
       }
       return current;
     }
+
+  rcl_interfaces::msg::SetParametersResult
+SemanticSegmentationLayer::dynamicParametersCallback(
+  std::vector<rclcpp::Parameter> parameters)
+{
+  auto result = rcl_interfaces::msg::SetParametersResult();
+  for (auto parameter : parameters) {
+    const auto & type = parameter.get_type();
+    const auto & name = parameter.get_name();
+
+    std::stringstream ss(topics_string_);
+    std::string source;
+    while (ss >> source) {
+      if (type == rclcpp::ParameterType::PARAMETER_DOUBLE) {
+        if (name == name_ + "." + source + "." + "max_obstacle_distance") {
+          for (auto & buffer : segmentation_buffers_) {
+            if (buffer->getBufferSource() == source) {
+              buffer->setMaxObstacleDistance(parameter.as_double());
+            }
+          }
+        } else if (name == name_ + "." + source + "." + "min_obstacle_distance") {
+          for (auto & buffer : segmentation_buffers_) {
+            if (buffer->getBufferSource() == source) {
+              buffer->setMinObstacleDistance(parameter.as_double());
+            }
+          }
+        }
+      // allow to change which class ids belong to each type
+      } else if (type == rclcpp::ParameterType::PARAMETER_STRING_ARRAY) {
+        for(auto & buffer : segmentation_buffers_) {
+          if (buffer->getBufferSource() == source) {
+            for(auto & class_type : buffer->getClassTypes()){
+              if (name == name_ + "." + source +  "." + class_type + "." + "classes") {
+                int class_type_cost;
+                node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".cost", class_type_cost);
+                for(auto & class_name : parameter.as_string_array()){
+                  buffer->updateClassMap(class_name, class_type_cost);
+                }
+              }
+            }
+          }
+        }
+      } else if (type == rclcpp::ParameterType::PARAMETER_INTEGER) {
+        for(auto & buffer : segmentation_buffers_) {
+          if (buffer->getBufferSource() == source) {
+            for(auto & class_type : buffer->getClassTypes()){
+              if (name == name_ + "." + source +  "." + class_type + "." + "cost") {
+                std::vector<std::string> class_names_for_type;
+                node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
+                for(auto & class_name : class_names_for_type){
+                  buffer->updateClassMap(class_name, parameter.as_int());
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  result.successful = true;
+  return result;
+}
 
 }  // namespace nav2_costmap_2d
 

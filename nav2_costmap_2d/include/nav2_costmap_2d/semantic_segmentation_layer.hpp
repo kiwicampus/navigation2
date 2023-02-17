@@ -115,6 +115,10 @@ class SemanticSegmentationLayer : public CostmapLayer
     std::vector<nav2_costmap_2d::Segmentation> & segmentations) const;
 
 
+  rcl_interfaces::msg::SetParametersResult
+  dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
+
+
  private:
   void syncSegmPointcloudCb(
     const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation>& segmentation,
@@ -134,7 +138,10 @@ class SemanticSegmentationLayer : public CostmapLayer
 
   std::vector<std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>> segmentation_buffers_;
 
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
+
   std::string global_frame_;
+  std::string topics_string_;
 
   std::map<std::string, uint8_t> class_map_;
 
