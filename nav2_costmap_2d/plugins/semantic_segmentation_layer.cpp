@@ -210,6 +210,7 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
                                              double* min_x, double* min_y, double* max_x,
                                              double* max_y)
 {
+  std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
   if (rolling_window_)
   {
     updateOrigin(robot_x - getSizeInMetersX() / 2, robot_y - getSizeInMetersY() / 2);
@@ -269,6 +270,7 @@ void SemanticSegmentationLayer::onFootprintChanged()
 void SemanticSegmentationLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int min_i,
                                             int min_j, int max_i, int max_j)
 {
+  std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
   if (!enabled_)
   {
     return;
@@ -356,10 +358,17 @@ bool SemanticSegmentationLayer::getSegmentations(
 SemanticSegmentationLayer::dynamicParametersCallback(
   std::vector<rclcpp::Parameter> parameters)
 {
+  std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
   auto result = rcl_interfaces::msg::SetParametersResult();
   for (auto parameter : parameters) {
     const auto & type = parameter.get_type();
     const auto & name = parameter.get_name();
+
+    if (type == rclcpp::ParameterType::PARAMETER_BOOL) {
+      if (name == name_ + "." + "enabled") {
+        enabled_ = parameter.as_bool();
+      }
+    }
 
     std::stringstream ss(topics_string_);
     std::string source;
