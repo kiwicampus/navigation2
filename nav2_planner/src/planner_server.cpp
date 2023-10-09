@@ -397,7 +397,9 @@ void PlannerServer::computePlanThroughPoses()
       if (i == 0) {
         curr_start = start;
       } else {
-        curr_start = goal->goals[i - 1];
+        curr_start = concat_path.poses.back();
+        curr_start.header = concat_path.header;
+        // curr_start = goal->goals[i - 1];
       }
       curr_goal = goal->goals[i];
 
