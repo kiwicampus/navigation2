@@ -41,11 +41,6 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2_ros/transform_listener.h"
 
-#include "robot_localization/srv/from_ll.hpp"
-#include "tf2_ros/buffer.h"
-#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
-#include "tf2_ros/transform_listener.h"
-
 namespace nav2_waypoint_follower
 {
 
@@ -164,29 +159,7 @@ protected:
    * @brief Action client goal response callback
    * @param goal Response of action server updated asynchronously
    */
-  template<typename T>
-  void goalResponseCallback(const T & goal);
-
-    /**
-     * @brief given some gps_poses, converts them to map frame using robot_localization's service `fromLL`.
-     *        Constructs a vector of stamped poses in map frame and returns them.
-     *
-     * @param gps_poses
-     * @return std::vector<geometry_msgs::msg::PoseStamped>
-     */
-    std::vector<geometry_msgs::msg::PoseStamped> convertGPSPosesToMapPoses(
-        const std::vector<geographic_msgs::msg::GeoPose>& gps_poses);
-
-  template<typename T>
-  std::vector<geometry_msgs::msg::PoseStamped> getLatestGoalPoses(const T & action_server);
-
-  // Common vars used for both GPS and cartesian point following
-  rclcpp::Node::SharedPtr client_node_;
-  std::vector<nav2_msgs::msg::MissedWaypoint> failed_ids_;
-  int loop_rate_;
-  bool stop_on_failure_;
-  std::string global_frame_id_{"map"};
-  std::string utm_frame_id_{"utm"};
+  void goalResponseCallback(const rclcpp_action::ClientGoalHandle<ClientT>::SharedPtr & goal);
 
   /**
    * @brief given some gps_poses, converts them to map frame using robot_localization's service `fromLL`.
@@ -240,11 +213,6 @@ protected:
   int loop_rate_;
   GoalStatus current_goal_status_;
 
-  // Our action server for GPS waypoint following
-  std::unique_ptr<ActionServerGPS> gps_action_server_;
-  std::unique_ptr<nav2_util::ServiceClient<robot_localization::srv::FromLL, std::shared_ptr<nav2_util::LifecycleNode>>> from_ll_to_map_client_;
-  double transform_tolerance_;
-
   // Task Execution At Waypoint Plugin
   pluginlib::ClassLoader<nav2_core::WaypointTaskExecutor>
   waypoint_task_executor_loader_;
@@ -252,10 +220,6 @@ protected:
   waypoint_task_executor_;
   std::string waypoint_task_executor_id_;
   std::string waypoint_task_executor_type_;
-
-  // tf buffer to get transfroms
-  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
-  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 };
 
 }  // namespace nav2_waypoint_follower

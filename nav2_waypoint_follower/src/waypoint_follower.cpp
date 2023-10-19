@@ -208,18 +208,9 @@ void WaypointFollower::followWaypointsHandler(
 {
   auto goal = action_server->get_current_goal();
 
-  // compile time static check to decide which block of code to be built
-  if constexpr (std::is_same<T, std::unique_ptr<ActionServer>>::value)
-  {
-    // If normal waypoint following callback was called, we build here
-    poses = action_server->get_current_goal()->poses;
-  } else {
-    // If GPS waypoint following callback was called, we build here
-    poses = convertGPSPosesToMapPoses(
-      action_server->get_current_goal()->gps_poses);
-  }
-  return poses;
-}
+  // handling loops
+  unsigned int current_loop_no = 0;
+  auto no_of_loops = goal->number_of_loops;
 
   std::vector<geometry_msgs::msg::PoseStamped> poses;
   poses = getLatestGoalPoses<T>(action_server);
@@ -244,7 +235,9 @@ void WaypointFollower::followWaypointsHandler(
   }
 
   rclcpp::WallRate r(loop_rate_);
-  uint32_t goal_index = 0;
+
+  // get the goal index, by default, the first in the list of waypoints given.
+  uint32_t goal_index = goal->goal_index;
   bool new_goal = true;
 
   while (rclcpp::ok()) {
@@ -337,8 +330,12 @@ void WaypointFollower::followWaypointsHandler(
         missedWaypoint.goal = poses[goal_index];
         missedWaypoint.error_code =
           nav2_msgs::action::FollowWaypoints::Goal::TASK_EXECUTOR_FAILED;
+        result->missed_waypoints.push_back(missedWaypoint);
+      }
+      // if task execution was failed and stop_on_failure_ is on , terminate action
       if (!is_task_executed && stop_on_failure_) {
         RCLCPP_WARN(
+          get_logger(), "Failed to execute task at waypoint %i "
           " stop on failure is enabled."
           " Terminating action.", goal_index);
 
@@ -355,7 +352,6 @@ void WaypointFollower::followWaypointsHandler(
     if (current_goal_status_.status != ActionStatus::PROCESSING) {
       // Update server state
       goal_index++;
-      poses[goal_index].header.stamp = this->now();
       new_goal = true;
       if (goal_index >= poses.size()) {
         if (current_loop_no == no_of_loops) {
@@ -367,18 +363,11 @@ void WaypointFollower::followWaypointsHandler(
           return;
         }
         RCLCPP_INFO(
-          get_logger(), "Completed all %zu waypoints requested.",
-          poses.size());
-        result->missed_waypoints = failed_ids_;
-        action_server->succeeded_current(result);
-        failed_ids_.clear();
-        return;
+          get_logger(), "Starting a new loop, current loop count is %i",
+          current_loop_no);
+        goal_index = 0;
+        current_loop_no++;
       }
-    } else {
-      RCLCPP_INFO_EXPRESSION(
-        get_logger(),
-        (static_cast<int>(now().seconds()) % 30 == 0),
-        "Processing waypoint %i...", goal_index);
     }
 
     callback_group_executor_.spin_some();
@@ -428,6 +417,7 @@ WaypointFollower::resultCallback(
       return;
     case rclcpp_action::ResultCode::ABORTED:
       current_goal_status_.status = ActionStatus::FAILED;
+      current_goal_status_.error_code = result.result->error_code;
       return;
     case rclcpp_action::ResultCode::CANCELED:
       current_goal_status_.status = ActionStatus::FAILED;
@@ -439,9 +429,9 @@ WaypointFollower::resultCallback(
   }
 }
 
-template<typename T>
-void WaypointFollower::goalResponseCallback(
-  const T & goal)
+void
+WaypointFollower::goalResponseCallback(
+  const rclcpp_action::ClientGoalHandle<ClientT>::SharedPtr & goal)
 {
   if (!goal) {
     RCLCPP_ERROR(
