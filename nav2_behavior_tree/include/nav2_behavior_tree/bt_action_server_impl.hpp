@@ -26,6 +26,7 @@
 #include "nav2_msgs/action/navigate_to_pose.hpp"
 #include "nav2_behavior_tree/bt_action_server.hpp"
 #include "ament_index_cpp/get_package_share_directory.hpp"
+#include "nav2_util/node_utils.hpp"
 
 namespace nav2_behavior_tree
 {
@@ -60,6 +61,9 @@ BtActionServer<ActionT>::BtActionServer(
   if (!node->has_parameter("default_server_timeout")) {
     node->declare_parameter("default_server_timeout", 20);
   }
+  if (!node->has_parameter("action_server_result_timeout")) {
+    node->declare_parameter("action_server_result_timeout", 900.0);
+  }
 
   std::vector<std::string> error_code_names = {
     "follow_path_error_code",
@@ -67,16 +71,29 @@ BtActionServer<ActionT>::BtActionServer(
   };
 
   if (!node->has_parameter("error_code_names")) {
-    std::string error_codes_str;
-    for (const auto & error_code : error_code_names) {
-      error_codes_str += error_code + "\n";
+    const rclcpp::ParameterValue value = node->declare_parameter(
+      "error_code_names",
+      rclcpp::PARAMETER_STRING_ARRAY);
+    if (value.get_type() == rclcpp::PARAMETER_NOT_SET) {
+      std::string error_codes_str;
+      for (const auto & error_code : error_code_names) {
+        error_codes_str += " " + error_code;
+      }
+      RCLCPP_WARN_STREAM(
+        logger_, "Error_code parameters were not set. Using default values of:"
+          << error_codes_str + "\n"
+          << "Make sure these match your BT and there are not other sources of error codes you"
+          "reported to your application");
+      rclcpp::Parameter error_code_names_param("error_code_names", error_code_names);
+      node->set_parameter(error_code_names_param);
+    } else {
+      error_code_names = value.get<std::vector<std::string>>();
+      std::string error_codes_str;
+      for (const auto & error_code : error_code_names) {
+        error_codes_str += " " + error_code;
+      }
+      RCLCPP_INFO_STREAM(logger_, "Error_code parameters were set to:" << error_codes_str);
     }
-    RCLCPP_WARN_STREAM(
-      logger_, "Error_code parameters were not set. Using default values of: "
-        << error_codes_str
-        << "Make sure these match your BT and there are not other sources of error codes you want "
-        "reported to your application");
-    node->declare_parameter("error_code_names", error_code_names);
   }
 }
 
@@ -109,19 +126,38 @@ bool BtActionServer<ActionT>::on_configure()
   // Support for handling the topic-based goal pose from rviz
   client_node_ = std::make_shared<rclcpp::Node>("_", options);
 
+  // Declare parameters for common client node applications to share with BT nodes
+  // Declare if not declared in case being used an external application, then copying
+  // all of the main node's parameters to the client for BT nodes to obtain
+  nav2_util::declare_parameter_if_not_declared(
+    node, "global_frame", rclcpp::ParameterValue(std::string("map")));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "robot_base_frame", rclcpp::ParameterValue(std::string("base_link")));
+  nav2_util::declare_parameter_if_not_declared(
+    node, "transform_tolerance", rclcpp::ParameterValue(0.1));
+  nav2_util::copy_all_parameters(node, client_node_);
+
+  // set the timeout in seconds for the action server to discard goal handles if not finished
+  double action_server_result_timeout;
+  node->get_parameter("action_server_result_timeout", action_server_result_timeout);
+  rcl_action_server_options_t server_options = rcl_action_server_get_default_options();
+  server_options.result_timeout.nanoseconds = RCL_S_TO_NS(action_server_result_timeout);
+
   action_server_ = std::make_shared<ActionServer>(
     node->get_node_base_interface(),
     node->get_node_clock_interface(),
     node->get_node_logging_interface(),
     node->get_node_waitables_interface(),
-    action_name_, std::bind(&BtActionServer<ActionT>::executeCallback, this));
+    action_name_, std::bind(&BtActionServer<ActionT>::executeCallback, this),
+    nullptr, std::chrono::milliseconds(500), false, server_options);
 
   // Get parameters for BT timeouts
-  int timeout;
-  node->get_parameter("bt_loop_duration", timeout);
-  bt_loop_duration_ = std::chrono::milliseconds(timeout);
-  node->get_parameter("default_server_timeout", timeout);
-  default_server_timeout_ = std::chrono::milliseconds(timeout);
+  int bt_loop_duration;
+  node->get_parameter("bt_loop_duration", bt_loop_duration);
+  bt_loop_duration_ = std::chrono::milliseconds(bt_loop_duration);
+  int default_server_timeout;
+  node->get_parameter("default_server_timeout", default_server_timeout);
+  default_server_timeout_ = std::chrono::milliseconds(default_server_timeout);
 
   // Get error code id names to grab off of the blackboard
   error_code_names_ = node->get_parameter("error_code_names").as_string_array();
@@ -211,6 +247,7 @@ void BtActionServer<ActionT>::executeCallback()
 {
   if (!on_goal_received_callback_(action_server_->get_current_goal())) {
     action_server_->terminate_current();
+    cleanErrorCodes();
     return;
   }
 
@@ -265,6 +302,8 @@ void BtActionServer<ActionT>::executeCallback()
       action_server_->terminate_all(result);
       break;
   }
+
+  cleanErrorCodes();
 }
 
 template<class ActionT>
@@ -279,7 +318,7 @@ void BtActionServer<ActionT>::populateErrorCode(
         highest_priority_error_code = current_error_code;
       }
     } catch (...) {
-      RCLCPP_ERROR(
+      RCLCPP_DEBUG(
         logger_,
         "Failed to get error code: %s from blackboard",
         error_code.c_str());
@@ -288,6 +327,14 @@ void BtActionServer<ActionT>::populateErrorCode(
 
   if (highest_priority_error_code != std::numeric_limits<int>::max()) {
     result->error_code = highest_priority_error_code;
+  }
+}
+
+template<class ActionT>
+void BtActionServer<ActionT>::cleanErrorCodes()
+{
+  for (const auto & error_code : error_code_names_) {
+    blackboard_->set<unsigned short>(error_code, 0);  //NOLINT
   }
 }
 

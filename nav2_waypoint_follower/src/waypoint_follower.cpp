@@ -36,9 +36,10 @@ WaypointFollower::WaypointFollower(const rclcpp::NodeOptions & options)
 
   declare_parameter("stop_on_failure", true);
   declare_parameter("loop_rate", 20);
-  declare_parameter("transform_tolerance", 0.1);
-  declare_parameter("global_frame_id", global_frame_id_);
-  declare_parameter("utm_frame_id", utm_frame_id_);
+
+  declare_parameter("action_server_result_timeout", 900.0);
+
+  declare_parameter("global_frame_id", "map");
 
   nav2_util::declare_parameter_if_not_declared(
     this, std::string("waypoint_task_executor_plugin"),
@@ -62,12 +63,8 @@ WaypointFollower::on_configure(const rclcpp_lifecycle::State & /*state*/)
   stop_on_failure_ = get_parameter("stop_on_failure").as_bool();
   loop_rate_ = get_parameter("loop_rate").as_int();
   waypoint_task_executor_id_ = get_parameter("waypoint_task_executor_plugin").as_string();
-  transform_tolerance_ = get_parameter("transform_tolerance").as_double();
   global_frame_id_ = get_parameter("global_frame_id").as_string();
-  utm_frame_id_ = get_parameter("utm_frame_id").as_string();
-
   global_frame_id_ = nav2_util::strip_leading_slash(global_frame_id_);
-  utm_frame_id_ = nav2_util::strip_leading_slash(utm_frame_id_);
 
   callback_group_ = create_callback_group(
     rclcpp::CallbackGroupType::MutuallyExclusive,
@@ -81,15 +78,24 @@ WaypointFollower::on_configure(const rclcpp_lifecycle::State & /*state*/)
     get_node_waitables_interface(),
     "navigate_to_pose", callback_group_);
 
-  action_server_ = std::make_unique<ActionServer>(
+  double action_server_result_timeout;
+  get_parameter("action_server_result_timeout", action_server_result_timeout);
+  rcl_action_server_options_t server_options = rcl_action_server_get_default_options();
+  server_options.result_timeout.nanoseconds = RCL_S_TO_NS(action_server_result_timeout);
+
+  xyz_action_server_ = std::make_unique<ActionServer>(
     get_node_base_interface(),
     get_node_clock_interface(),
     get_node_logging_interface(),
     get_node_waitables_interface(),
-    "follow_waypoints", std::bind(&WaypointFollower::followWaypointsCallback, this));
+    "follow_waypoints", std::bind(
+      &WaypointFollower::followWaypointsCallback,
+      this), nullptr, std::chrono::milliseconds(
+      500), false, server_options);
 
   from_ll_to_map_client_ = std::make_unique<
-    nav2_util::ServiceClient<robot_localization::srv::FromLL, std::shared_ptr<nav2_util::LifecycleNode>>>(
+    nav2_util::ServiceClient<robot_localization::srv::FromLL,
+    std::shared_ptr<nav2_util::LifecycleNode>>>(
     "/fromLL",
     node);
 
@@ -98,11 +104,11 @@ WaypointFollower::on_configure(const rclcpp_lifecycle::State & /*state*/)
     get_node_clock_interface(),
     get_node_logging_interface(),
     get_node_waitables_interface(),
-    "follow_gps_waypoints", std::bind(&WaypointFollower::followGPSWaypointsCallback, this));
-
-  // used for transfroming orientation of GPS poses to map frame
-  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    "follow_gps_waypoints",
+    std::bind(
+      &WaypointFollower::followGPSWaypointsCallback,
+      this), nullptr, std::chrono::milliseconds(
+      500), false, server_options);
 
   try {
     waypoint_task_executor_type_ = nav2_util::get_plugin_type_param(
@@ -128,7 +134,7 @@ WaypointFollower::on_activate(const rclcpp_lifecycle::State & /*state*/)
 {
   RCLCPP_INFO(get_logger(), "Activating");
 
-  action_server_->activate();
+  xyz_action_server_->activate();
   gps_action_server_->activate();
 
   auto node = shared_from_this();
@@ -147,10 +153,9 @@ WaypointFollower::on_deactivate(const rclcpp_lifecycle::State & /*state*/)
 {
   RCLCPP_INFO(get_logger(), "Deactivating");
 
-  action_server_->deactivate();
+  xyz_action_server_->deactivate();
   gps_action_server_->deactivate();
   dyn_params_handler_.reset();
-  
   // destroy bond connection
   destroyBond();
 
@@ -162,7 +167,7 @@ WaypointFollower::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
 {
   RCLCPP_INFO(get_logger(), "Cleaning up");
 
-  action_server_.reset();
+  xyz_action_server_.reset();
   nav_to_pose_client_.reset();
   gps_action_server_.reset();
   from_ll_to_map_client_.reset();
@@ -184,8 +189,7 @@ std::vector<geometry_msgs::msg::PoseStamped> WaypointFollower::getLatestGoalPose
   std::vector<geometry_msgs::msg::PoseStamped> poses;
 
   // compile time static check to decide which block of code to be built
-  if constexpr (std::is_same<T, std::unique_ptr<ActionServer>>::value)
-  {
+  if constexpr (std::is_same<T, std::unique_ptr<ActionServer>>::value) {
     // If normal waypoint following callback was called, we build here
     poses = action_server->get_current_goal()->poses;
   } else {
@@ -203,6 +207,19 @@ void WaypointFollower::followWaypointsHandler(
   const Z & result)
 {
   auto goal = action_server->get_current_goal();
+
+  // compile time static check to decide which block of code to be built
+  if constexpr (std::is_same<T, std::unique_ptr<ActionServer>>::value)
+  {
+    // If normal waypoint following callback was called, we build here
+    poses = action_server->get_current_goal()->poses;
+  } else {
+    // If GPS waypoint following callback was called, we build here
+    poses = convertGPSPosesToMapPoses(
+      action_server->get_current_goal()->gps_poses);
+  }
+  return poses;
+}
 
   std::vector<geometry_msgs::msg::PoseStamped> poses;
   poses = getLatestGoalPoses<T>(action_server);
@@ -266,16 +283,12 @@ void WaypointFollower::followWaypointsHandler(
       client_goal.pose.header.stamp = this->now();
 
       auto send_goal_options = rclcpp_action::Client<ClientT>::SendGoalOptions();
-      send_goal_options.result_callback =
-        std::bind(
-        &WaypointFollower::resultCallback<rclcpp_action::ClientGoalHandle<ClientT>::WrappedResult>,
-        this,
+      send_goal_options.result_callback = std::bind(
+        &WaypointFollower::resultCallback, this,
         std::placeholders::_1);
-      send_goal_options.goal_response_callback =
-        std::bind(
-        &WaypointFollower::goalResponseCallback
-        <rclcpp_action::ClientGoalHandle<ClientT>::SharedPtr>, this,
-        std::placeholders::_1);
+      send_goal_options.goal_response_callback = std::bind(
+        &WaypointFollower::goalResponseCallback,
+        this, std::placeholders::_1);
 
       future_goal_handle_ =
         nav_to_pose_client_->async_send_goal(client_goal, send_goal_options);
@@ -285,7 +298,10 @@ void WaypointFollower::followWaypointsHandler(
     feedback->current_waypoint = goal_index;
     action_server->publish_feedback(feedback);
 
-    if (current_goal_status_.status == ActionStatus::FAILED) {
+    if (
+      current_goal_status_.status == ActionStatus::FAILED ||
+      current_goal_status_.status == ActionStatus::UNKNOWN)
+    {
       nav2_msgs::msg::MissedWaypoint missedWaypoint;
       missedWaypoint.index = goal_index;
       missedWaypoint.goal = poses[goal_index];
@@ -297,9 +313,8 @@ void WaypointFollower::followWaypointsHandler(
           get_logger(), "Failed to process waypoint %i in waypoint "
           "list and stop on failure is enabled."
           " Terminating action.", goal_index);
-        result->missed_waypoints = failed_ids_;
         action_server->terminate_current(result);
-        failed_ids_.clear();
+        current_goal_status_.error_code = 0;
         return;
       } else {
         RCLCPP_INFO(
@@ -320,18 +335,15 @@ void WaypointFollower::followWaypointsHandler(
         nav2_msgs::msg::MissedWaypoint missedWaypoint;
         missedWaypoint.index = goal_index;
         missedWaypoint.goal = poses[goal_index];
-        missedWaypoint.error_code = nav2_msgs::action::FollowWaypoints::Goal::TASK_EXECUTOR_FAILED;
-        result->missed_waypoints.push_back(missedWaypoint);
-      }
-      // if task execution was failed and stop_on_failure_ is on , terminate action
+        missedWaypoint.error_code =
+          nav2_msgs::action::FollowWaypoints::Goal::TASK_EXECUTOR_FAILED;
       if (!is_task_executed && stop_on_failure_) {
         RCLCPP_WARN(
-          get_logger(), "Failed to execute task at waypoint %i "
           " stop on failure is enabled."
           " Terminating action.", goal_index);
-        result->missed_waypoints = failed_ids_;
+
         action_server->terminate_current(result);
-        failed_ids_.clear();
+        current_goal_status_.error_code = 0;
         return;
       } else {
         RCLCPP_INFO(
@@ -340,14 +352,20 @@ void WaypointFollower::followWaypointsHandler(
       }
     }
 
-    if (current_goal_status_.status != ActionStatus::PROCESSING &&
-      current_goal_status_.status != ActionStatus::UNKNOWN)
-    {
+    if (current_goal_status_.status != ActionStatus::PROCESSING) {
       // Update server state
       goal_index++;
       poses[goal_index].header.stamp = this->now();
       new_goal = true;
       if (goal_index >= poses.size()) {
+        if (current_loop_no == no_of_loops) {
+          RCLCPP_INFO(
+            get_logger(), "Completed all %zu waypoints requested.",
+            poses.size());
+          action_server->succeeded_current(result);
+          current_goal_status_.error_code = 0;
+          return;
+        }
         RCLCPP_INFO(
           get_logger(), "Completed all %zu waypoints requested.",
           poses.size());
@@ -376,7 +394,7 @@ void WaypointFollower::followWaypointsCallback()
   followWaypointsHandler<std::unique_ptr<ActionServer>,
     ActionT::Feedback::SharedPtr,
     ActionT::Result::SharedPtr>(
-    action_server_,
+    xyz_action_server_,
     feedback, result);
 }
 
@@ -392,9 +410,9 @@ void WaypointFollower::followGPSWaypointsCallback()
     feedback, result);
 }
 
-template<typename T>
-void WaypointFollower::resultCallback(
-  const T & result)
+void
+WaypointFollower::resultCallback(
+  const rclcpp_action::ClientGoalHandle<ClientT>::WrappedResult & result)
 {
   if (result.goal_id != future_goal_handle_.get()->get_goal_id()) {
     RCLCPP_DEBUG(
@@ -415,6 +433,7 @@ void WaypointFollower::resultCallback(
       current_goal_status_.status = ActionStatus::FAILED;
       return;
     default:
+      RCLCPP_ERROR(get_logger(), "Received an UNKNOWN result code from navigation action!");
       current_goal_status_.status = ActionStatus::UNKNOWN;
       return;
   }
@@ -461,8 +480,9 @@ std::vector<geometry_msgs::msg::PoseStamped>
 WaypointFollower::convertGPSPosesToMapPoses(
   const std::vector<geographic_msgs::msg::GeoPose> & gps_poses)
 {
-  RCLCPP_INFO(this->get_logger(), "Converting GPS waypoints to %s Frame..", 
-        global_frame_id_.c_str());
+  RCLCPP_INFO(
+    this->get_logger(), "Converting GPS waypoints to %s Frame..",
+    global_frame_id_.c_str());
 
   std::vector<geometry_msgs::msg::PoseStamped> poses_in_map_frame_vector;
   int waypoint_index = 0;
@@ -479,13 +499,15 @@ WaypointFollower::convertGPSPosesToMapPoses(
         this->get_logger(),
         "fromLL service of robot_localization could not convert %i th GPS waypoint to"
         "%s frame, going to skip this point!"
-        "Make sure you have run navsat_transform_node of robot_localization", waypoint_index, global_frame_id_.c_str());
+        "Make sure you have run navsat_transform_node of robot_localization",
+        waypoint_index, global_frame_id_.c_str());
       if (stop_on_failure_) {
         RCLCPP_ERROR(
           this->get_logger(),
           "Conversion of %i th GPS waypoint to"
           "%s frame failed and stop_on_failure is set to true"
-          "Not going to execute any of waypoints, exiting with failure!", waypoint_index, global_frame_id_.c_str());
+          "Not going to execute any of waypoints, exiting with failure!",
+          waypoint_index, global_frame_id_.c_str());
         return std::vector<geometry_msgs::msg::PoseStamped>();
       }
       continue;

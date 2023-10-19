@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Samsung Research America, @artofnothingness Alexey Budyakov
+// Copyright (c) 2023 Open Navigation LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,8 @@ void PathAlignCritic::initialize()
   getParam(trajectory_point_step_, "trajectory_point_step", 4);
   getParam(
     threshold_to_consider_,
-    "threshold_to_consider", 0.40f);
+    "threshold_to_consider", 0.5);
+  getParam(use_path_orientations_, "use_path_orientations", false);
 
   RCLCPP_INFO(
     logger_,
@@ -53,7 +54,8 @@ void PathAlignCritic::score(CriticData & data)
 
   // Don't apply when first getting bearing w.r.t. the path
   utils::setPathFurthestPointIfNotSet(data);
-  if (*data.furthest_reached_path_point < offset_from_furthest_) {
+  const size_t path_segments_count = *data.furthest_reached_path_point;  // up to furthest only
+  if (path_segments_count < offset_from_furthest_) {
     return;
   }
 
@@ -69,48 +71,62 @@ void PathAlignCritic::score(CriticData & data)
     }
   }
 
-  const auto & T_x = data.trajectories.x;
-  const auto & T_y = data.trajectories.y;
-
   const auto P_x = xt::view(data.path.x, xt::range(_, -1));  // path points
   const auto P_y = xt::view(data.path.y, xt::range(_, -1));  // path points
+  const auto P_yaw = xt::view(data.path.yaws, xt::range(_, -1));  // path points
 
-  const size_t batch_size = T_x.shape(0);
-  const size_t time_steps = T_x.shape(1);
-  const size_t traj_pts_eval = floor(time_steps / trajectory_point_step_);
-  const size_t path_segments_count = data.path.x.shape(0) - 1;
+  const size_t batch_size = data.trajectories.x.shape(0);
+  const size_t time_steps = data.trajectories.x.shape(1);
   auto && cost = xt::xtensor<float, 1>::from_shape({data.costs.shape(0)});
 
-  if (path_segments_count < 1) {
-    return;
+  // Find integrated distance in the path
+  std::vector<float> path_integrated_distances(path_segments_count, 0.0f);
+  float dx = 0.0f, dy = 0.0f;
+  for (unsigned int i = 1; i != path_segments_count; i++) {
+    dx = P_x(i) - P_x(i - 1);
+    dy = P_y(i) - P_y(i - 1);
+    float curr_dist = sqrtf(dx * dx + dy * dy);
+    path_integrated_distances[i] = path_integrated_distances[i - 1] + curr_dist;
   }
 
+  float traj_integrated_distance = 0.0f;
+  float summed_path_dist = 0.0f, dyaw = 0.0f;
+  float num_samples = 0.0f;
+  float Tx = 0.0f, Ty = 0.0f;
+  size_t path_pt = 0;
   for (size_t t = 0; t < batch_size; ++t) {
-    float summed_dist = 0;
+    traj_integrated_distance = 0.0f;
+    summed_path_dist = 0.0f;
+    num_samples = 0.0f;
+    const auto T_x = xt::view(data.trajectories.x, t, xt::all());
+    const auto T_y = xt::view(data.trajectories.y, t, xt::all());
     for (size_t p = trajectory_point_step_; p < time_steps; p += trajectory_point_step_) {
-      double min_dist_sq = std::numeric_limits<float>::max();
-      size_t min_s = 0;
-
-      // Find closest path segment to the trajectory point
-      for (size_t s = 0; s < path_segments_count - 1; s++) {
-        xt::xtensor_fixed<float, xt::xshape<2>> P;
-        float dx = P_x(s) - T_x(t, p);
-        float dy = P_y(s) - T_y(t, p);
-        float dist_sq = dx * dx + dy * dy;
-        if (dist_sq < min_dist_sq) {
-          min_dist_sq = dist_sq;
-          min_s = s;
-        }
-      }
+      Tx = T_x(p);
+      Ty = T_y(p);
+      dx = Tx - T_x(p - trajectory_point_step_);
+      dy = Ty - T_y(p - trajectory_point_step_);
+      traj_integrated_distance += sqrtf(dx * dx + dy * dy);
+      path_pt = utils::findClosestPathPt(
+        path_integrated_distances, traj_integrated_distance, path_pt);
 
       // The nearest path point to align to needs to be not in collision, else
       // let the obstacle critic take over in this region due to dynamic obstacles
-      if (min_s != 0 && (*data.path_pts_valid)[min_s]) {
-        summed_dist += std::sqrt(min_dist_sq);
+      if ((*data.path_pts_valid)[path_pt]) {
+        dx = P_x(path_pt) - Tx;
+        dy = P_y(path_pt) - Ty;
+        num_samples += 1.0f;
+        if (use_path_orientations_) {
+          const auto T_yaw = xt::view(data.trajectories.yaws, t, xt::all());
+          dyaw = angles::shortest_angular_distance(P_yaw(path_pt), T_yaw(p));
+          summed_path_dist += sqrtf(dx * dx + dy * dy + dyaw * dyaw);
+        } else {
+          summed_path_dist += sqrtf(dx * dx + dy * dy);
+        }
       }
     }
-
-    cost[t] = summed_dist / traj_pts_eval;
+    if (num_samples > 0) {
+      cost[t] = summed_path_dist / num_samples;
+    }
   }
 
   data.costs += xt::pow(std::move(cost) * weight_, power_);

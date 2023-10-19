@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Samsung Research America, @artofnothingness Alexey Budyakov
+// Copyright (c) 2023 Open Navigation LLC
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ protected:
   int trajectory_point_step_{0};
   float threshold_to_consider_{0};
   float max_path_occupancy_ratio_{0};
+  bool use_path_orientations_{false};
   unsigned int power_{0};
   float weight_{0};
 };
