@@ -48,7 +48,7 @@ using namespace std::chrono_literals;
 
 namespace nav2_costmap_2d {
 SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& parent,
-                                       std::string buffer_source, std::vector<std::string> class_types, std::map<std::string, uint8_t> class_names_cost_map, double observation_keep_time,
+                                       std::string buffer_source, std::vector<std::string> class_types, std::unordered_map<std::string, uint8_t> class_names_cost_map, double observation_keep_time,
                                        double expected_update_rate, double max_lookahead_distance,
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
@@ -73,9 +73,18 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
 
 SegmentationBuffer::~SegmentationBuffer() {}
 
+void SegmentationBuffer::createClassIdCostMap(const vision_msgs::msg::LabelInfo& label_info)
+{
+  for (const auto& semantic_class : label_info.class_map)
+    {
+      class_ids_cost_map_[semantic_class.class_id] = class_names_cost_map_[semantic_class.class_name];
+    }
+}
+
 void SegmentationBuffer::bufferSegmentation(
   const sensor_msgs::msg::PointCloud2& cloud,
-  const vision_msgs::msg::SemanticSegmentation& segmentation)
+  const sensor_msgs::msg::Image& segmentation,
+  const sensor_msgs::msg::Image& confidence)
 {
   geometry_msgs::msg::PointStamped global_origin;
 
@@ -157,7 +166,7 @@ void SegmentationBuffer::bufferSegmentation(
           continue;
         }
         *(iter_class_obs + point_count) = segmentation.data[pixel_idx];
-        *(iter_confidence_obs + point_count) = segmentation.confidence[pixel_idx];
+        *(iter_confidence_obs + point_count) = confidence.data[pixel_idx];
         *(iter_x_obs + point_count) = *(iter_x_global + pixel_idx);
         *(iter_y_obs + point_count) = *(iter_y_global + pixel_idx);
         *(iter_z_obs + point_count) = *(iter_z_global + pixel_idx);
@@ -170,12 +179,7 @@ void SegmentationBuffer::bufferSegmentation(
     segmentation_cloud.header.stamp = cloud.header.stamp;
     segmentation_cloud.header.frame_id = global_frame_cloud.header.frame_id;
 
-    // create tje class map from the classes contained on the segmentation message
-    std::map<uint16_t, uint8_t>& segmentation_class_map = segmentation_list_.front().class_map_;
-    for (auto& semantic_class : segmentation.class_map)
-    {
-      segmentation_class_map[semantic_class.class_id] = class_names_cost_map_[semantic_class.class_name];
-    }
+    segmentation_list_.front().class_map_ = class_ids_cost_map_;
   } catch (tf2::TransformException& ex)
   {
     // if an exception occurs, we need to remove the empty segmentation from the list
@@ -208,7 +212,7 @@ void SegmentationBuffer::getSegmentations(std::vector<Segmentation>& segmentatio
   segmentation_list_.clear();
 }
 
-std::map<std::string, uint8_t> SegmentationBuffer::getClassMap()
+std::unordered_map<std::string, uint8_t> SegmentationBuffer::getClassMap()
 {
   return class_names_cost_map_;
 }

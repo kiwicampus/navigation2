@@ -66,7 +66,7 @@ void SemanticSegmentationLayer::onInitialize()
   {
     throw std::runtime_error{"Failed to lock node"};
   }
-  std::string segmentation_topic, pointcloud_topic, sensor_frame;
+  std::string segmentation_topic, pointcloud_topic, labels_topic, sensor_frame;
   std::vector<std::string> class_types_string;
   double max_obstacle_distance, min_obstacle_distance, observation_keep_time, transform_tolerance,
     expected_update_rate;
@@ -102,6 +102,7 @@ void SemanticSegmentationLayer::onInitialize()
 
   while (ss >> source) {
     declareParameter(source + "." + "segmentation_topic", rclcpp::ParameterValue(""));
+    declareParameter(source + "." + "labels_topic", rclcpp::ParameterValue(""));
     declareParameter(source + "." + "pointcloud_topic", rclcpp::ParameterValue(""));
     declareParameter(source + "." + "observation_persistence", rclcpp::ParameterValue(0.0));
     declareParameter(source + "." + "sensor_frame", rclcpp::ParameterValue(""));
@@ -111,6 +112,7 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "min_obstacle_distance", rclcpp::ParameterValue(0.3));
     
     node->get_parameter(name_ + "." + source + "." + "segmentation_topic", segmentation_topic);
+    node->get_parameter(name_ + "." + source + "." + "labels_topic", labels_topic);
     node->get_parameter(name_ + "." + source + "." + "pointcloud_topic", pointcloud_topic);
     node->get_parameter(name_ + "." + source + "." + "observation_persistence", observation_keep_time);
     node->get_parameter(name_ + "." + source + "." + "sensor_frame", sensor_frame);
@@ -124,7 +126,7 @@ void SemanticSegmentationLayer::onInitialize()
       exit(-1);
     }
     
-    std::map<std::string, uint8_t> class_map;
+    std::unordered_map<std::string, uint8_t> class_map;
 
     for (auto& class_type : class_types_string)
     {
@@ -151,8 +153,20 @@ void SemanticSegmentationLayer::onInitialize()
       exit(-1);
     }
 
-
+    //sensor data subscriptions
+    auto sub_opt = rclcpp::SubscriptionOptions();
+    sub_opt.callback_group = callback_group_;
     rmw_qos_profile_t custom_qos_profile = rmw_qos_profile_sensor_data;
+
+    // label info subscription
+    rclcpp::SubscriptionOptionsWithAllocator<std::allocator<void>> tl_sub_opt;
+    tl_sub_opt.use_intra_process_comm = rclcpp::IntraProcessSetting::Disable;
+    tl_sub_opt.callback_group = callback_group_;
+    rmw_qos_profile_t tl_qos = rmw_qos_profile_system_default;
+    tl_qos.history = RMW_QOS_POLICY_HISTORY_KEEP_ALL;
+    tl_qos.depth = 5;
+    tl_qos.reliability = RMW_QOS_POLICY_RELIABILITY_RELIABLE;
+    tl_qos.durability = RMW_QOS_POLICY_DURABILITY_TRANSIENT_LOCAL;
 
     auto segmentation_buffer = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
       node, source, class_types_string, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
@@ -163,15 +177,20 @@ void SemanticSegmentationLayer::onInitialize()
     
 
     auto semantic_segmentation_sub =
-      std::make_shared<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation, rclcpp_lifecycle::LifecycleNode>>(
-        node, segmentation_topic, custom_qos_profile);
+      std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image, rclcpp_lifecycle::LifecycleNode>>(
+        node, segmentation_topic, custom_qos_profile, sub_opt);
     semantic_segmentation_subs_.push_back(semantic_segmentation_sub);
-    // semantic_segmentation_sub->registerCallback([&](std::shared_ptr<const vision_msgs::msg::SemanticSegmentation> /*msg*/){
+    // semantic_segmentation_sub->registerCallback([&](std::shared_ptr<const sensor_msgs::msg::Image> /*msg*/){
     //   std::cout << "got sgm" << std::endl;
     // });
 
+    auto label_info_sub = std::make_shared<message_filters::Subscriber<vision_msgs::msg::LabelInfo, rclcpp_lifecycle::LifecycleNode>>(
+        node, labels_topic, tl_qos, tl_sub_opt);
+    label_info_sub->registerCallback(std::bind(&SemanticSegmentationLayer::labelinfoCb, this, std::placeholders::_1, segmentation_buffers_.back()));
+    label_info_subs_.push_back(label_info_sub);
+
     auto pointcloud_sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>(
-      node, pointcloud_topic, custom_qos_profile);
+      node, pointcloud_topic, custom_qos_profile, sub_opt);
     pointcloud_subs_.push_back(pointcloud_sub);
     // pointcloud_sub->registerCallback([&](std::shared_ptr<const sensor_msgs::msg::PointCloud2> /*msg*/){
     //   std::cout << "got pc" << std::endl;
@@ -187,7 +206,7 @@ void SemanticSegmentationLayer::onInitialize()
     pointcloud_tf_subs_.push_back(pointcloud_tf_sub);
     
     auto segm_pc_sync =
-      std::make_shared<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation,
+      std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::Image,
                                                         sensor_msgs::msg::PointCloud2>>(
         *semantic_segmentation_subs_.back(), *pointcloud_tf_subs_.back(), 1000);
     segm_pc_sync->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this,
@@ -299,8 +318,15 @@ void SemanticSegmentationLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_g
   }
 }
 
+void SemanticSegmentationLayer::labelinfoCb(
+    const std::shared_ptr<const vision_msgs::msg::LabelInfo>& label_info,
+    const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer> & buffer)
+    {
+      buffer->createClassIdCostMap(*label_info);
+    }
+
 void SemanticSegmentationLayer::syncSegmPointcloudCb(
-  const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation>& segmentation,
+  const std::shared_ptr<const sensor_msgs::msg::Image>& segmentation,
   const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
   const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer> & buffer)
 {
@@ -314,22 +340,23 @@ void SemanticSegmentationLayer::syncSegmPointcloudCb(
     return;
   }
   unsigned expected_array_size = segmentation->width * segmentation->height;
-  if (segmentation->data.size() < expected_array_size ||
-      segmentation->confidence.size() < expected_array_size)
+  if (segmentation->data.size() < expected_array_size)
   {
     RCLCPP_WARN(logger_,
-                "segmentation arrays have wrong sizes: data->%lu, confidence->%lu, expected->%u. "
+                "segmentation arrays have wrong sizes: data->%lu, expected->%u. "
                 "Will not buffer message",
-                segmentation->data.size(), segmentation->confidence.size(), expected_array_size);
+                segmentation->data.size(), expected_array_size);
     return;
   }
-  if (segmentation->class_map.size() == 0)
+  if (buffer->isClassIdCostMapEmpty())
   {
-    RCLCPP_WARN(logger_, "Class map is empty. Will not buffer message");
+    RCLCPP_WARN(logger_, "Class map is empty because a labelinfo message has not been received for topic %s. Will not buffer message", buffer->getBufferSource().c_str());
     return;
   }
   buffer->lock();
-  buffer->bufferSegmentation(*pointcloud, *segmentation);
+  // we are passing the segmentation as confidence temporarily while we figure out a good use for getting
+  // confidence maps
+  buffer->bufferSegmentation(*pointcloud, *segmentation, *segmentation);
   buffer->unlock();
 }
 

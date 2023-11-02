@@ -50,8 +50,9 @@
 #include "nav2_costmap_2d/segmentation_buffer.hpp"
 #include "nav2_util/node_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/image.hpp"
 #include "tf2_ros/message_filter.h"
-#include "vision_msgs/msg/semantic_segmentation.hpp"
+#include "vision_msgs/msg/label_info.hpp"
 
 namespace nav2_costmap_2d {
 
@@ -61,93 +62,95 @@ namespace nav2_costmap_2d {
  */
 class SemanticSegmentationLayer : public CostmapLayer
 {
- public:
-  /**
-   * @brief A constructor
-   */
-  SemanticSegmentationLayer();
+   public:
+    /**
+     * @brief A constructor
+     */
+    SemanticSegmentationLayer();
 
-  /**
-   * @brief A destructor
-   */
-  virtual ~SemanticSegmentationLayer() {}
+    /**
+     * @brief A destructor
+     */
+    virtual ~SemanticSegmentationLayer() {}
 
-  /**
-   * @brief Initialization process of layer on startup
-   */
-  virtual void onInitialize();
-  /**
-   * @brief Update the bounds of the master costmap by this layer's update dimensions
-   * @param robot_x X pose of robot
-   * @param robot_y Y pose of robot
-   * @param robot_yaw Robot orientation
-   * @param min_x X min map coord of the window to update
-   * @param min_y Y min map coord of the window to update
-   * @param max_x X max map coord of the window to update
-   * @param max_y Y max map coord of the window to update
-   */
-  virtual void updateBounds(double robot_x, double robot_y, double robot_yaw, double* min_x,
-                            double* min_y, double* max_x, double* max_y);
-  /**
-   * @brief Update the costs in the master costmap in the window
-   * @param master_grid The master costmap grid to update
-   * @param min_x X min map coord of the window to update
-   * @param min_y Y min map coord of the window to update
-   * @param max_x X max map coord of the window to update
-   * @param max_y Y max map coord of the window to update
-   */
-  virtual void updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int min_i, int min_j, int max_i,
-                           int max_j);
+    /**
+     * @brief Initialization process of layer on startup
+     */
+    virtual void onInitialize();
+    /**
+     * @brief Update the bounds of the master costmap by this layer's update dimensions
+     * @param robot_x X pose of robot
+     * @param robot_y Y pose of robot
+     * @param robot_yaw Robot orientation
+     * @param min_x X min map coord of the window to update
+     * @param min_y Y min map coord of the window to update
+     * @param max_x X max map coord of the window to update
+     * @param max_y Y max map coord of the window to update
+     */
+    virtual void updateBounds(double robot_x, double robot_y, double robot_yaw, double* min_x, double* min_y,
+                              double* max_x, double* max_y);
+    /**
+     * @brief Update the costs in the master costmap in the window
+     * @param master_grid The master costmap grid to update
+     * @param min_x X min map coord of the window to update
+     * @param min_y Y min map coord of the window to update
+     * @param max_x X max map coord of the window to update
+     * @param max_y Y max map coord of the window to update
+     */
+    virtual void updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int min_i, int min_j, int max_i, int max_j);
 
-  /**
-   * @brief Reset this costmap
-   */
-  virtual void reset();
+    /**
+     * @brief Reset this costmap
+     */
+    virtual void reset();
 
-  virtual void onFootprintChanged();
+    virtual void onFootprintChanged();
 
-  /**
-   * @brief If clearing operations should be processed on this layer or not
-   */
-  virtual bool isClearable() { return true; }
+    /**
+     * @brief If clearing operations should be processed on this layer or not
+     */
+    virtual bool isClearable() { return true; }
 
-  bool getSegmentations(
-    std::vector<nav2_costmap_2d::Segmentation> & segmentations) const;
+    bool getSegmentations(std::vector<nav2_costmap_2d::Segmentation>& segmentations) const;
 
+    rcl_interfaces::msg::SetParametersResult dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
 
-  rcl_interfaces::msg::SetParametersResult
-  dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
+   private:
+    void syncSegmPointcloudCb(const std::shared_ptr<const sensor_msgs::msg::Image>& segmentation,
+                              const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
+                              const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer);
 
+    void labelinfoCb(const std::shared_ptr<const vision_msgs::msg::LabelInfo>& label_info,
+                     const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer);
 
- private:
-  void syncSegmPointcloudCb(
-    const std::shared_ptr<const vision_msgs::msg::SemanticSegmentation>& segmentation,
-    const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
-    const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer> & buffer);
+    std::vector<std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image, rclcpp_lifecycle::LifecycleNode>>>
+        semantic_segmentation_subs_;
+    std::vector<
+        std::shared_ptr<message_filters::Subscriber<vision_msgs::msg::LabelInfo, rclcpp_lifecycle::LifecycleNode>>>
+        label_info_subs_;
+    std::vector<
+        std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>>
+        pointcloud_subs_;
+    std::vector<
+        std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::PointCloud2>>>
+        segm_pc_notifiers_;
+    std::vector<std::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>> pointcloud_tf_subs_;
 
-  std::vector<std::shared_ptr<message_filters::Subscriber<vision_msgs::msg::SemanticSegmentation, rclcpp_lifecycle::LifecycleNode>>>
-    semantic_segmentation_subs_;
-  std::vector<std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>> pointcloud_subs_;
-  std::vector<std::shared_ptr<message_filters::TimeSynchronizer<vision_msgs::msg::SemanticSegmentation,
-                                                    sensor_msgs::msg::PointCloud2>>>
-    segm_pc_notifiers_;
-  std::vector<std::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>> pointcloud_tf_subs_;
+    // debug publishers
+    std::map<std::string, std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::PointCloud2>>> proc_pointcloud_pubs_map_;
 
-  // debug publishers
-  std::map<std::string, std::shared_ptr<rclcpp::Publisher<sensor_msgs::msg::PointCloud2>>> proc_pointcloud_pubs_map_;
+    std::vector<std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>> segmentation_buffers_;
 
-  std::vector<std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>> segmentation_buffers_;
+    rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
 
-  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
+    std::string global_frame_;
+    std::string topics_string_;
 
-  std::string global_frame_;
-  std::string topics_string_;
+    std::map<std::string, uint8_t> class_map_;
 
-  std::map<std::string, uint8_t> class_map_;
-
-  bool rolling_window_;
-  bool was_reset_;
-  int combination_method_;
+    bool rolling_window_;
+    bool was_reset_;
+    int combination_method_;
 };
 
 }  // namespace nav2_costmap_2d
