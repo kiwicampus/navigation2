@@ -41,6 +41,11 @@ public:
    */
   void score(CriticData & data) override;
 
+  /**
+   * @brief Calculate the max velocities when externally update happens
+   */
+  void updateMaxVel();
+
   float getMaxVelConstraint() {return max_vel_;}
   float getMinVelConstraint() {return min_vel_;}
 
