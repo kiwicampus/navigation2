@@ -20,6 +20,7 @@ namespace mppi::critics
 void ConstraintCritic::initialize()
 {
   auto getParam = parameters_handler_->getParamGetter(name_);
+  auto getParentParam = parameters_handler_->getParamGetter(parent_name_);
 
   getParam(power_, "cost_power", 1);
   getParam(weight_, "cost_weight", 4.0);
@@ -27,14 +28,6 @@ void ConstraintCritic::initialize()
     logger_, "ConstraintCritic instantiated with %d power and %f weight.",
     power_, weight_);
   
-  updateMaxVel();
-}
-
-void ConstraintCritic::updateMaxVel()
-{
-
-  auto getParentParam = parameters_handler_->getParamGetter(parent_name_);
-
   float vx_max, vy_max, vx_min;
   getParentParam(vx_max, "vx_max", 0.5);
   getParentParam(vy_max, "vy_max", 0.0);

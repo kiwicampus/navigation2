@@ -41,7 +41,6 @@
 #include "nav2_mppi_controller/tools/noise_generator.hpp"
 #include "nav2_mppi_controller/tools/parameters_handler.hpp"
 #include "nav2_mppi_controller/tools/utils.hpp"
-// #include "nav2_mppi_controller/critics/constraint_critic.hpp"
 
 namespace mppi
 {
@@ -220,12 +219,6 @@ protected:
    * @return Bool if holonomic to populate `y` axis of state
    */
   bool isHolonomic() const;
-
-  /**
-   * @brief Using this function allow to catch the velocity updated and use it 
-   * as the new maximum velocities.
-   */
-  void UpdateVelocities();
 
   /**
    * @brief Using control frequence and time step size, determine if trajectory

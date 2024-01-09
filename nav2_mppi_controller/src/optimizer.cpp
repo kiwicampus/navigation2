@@ -123,8 +123,9 @@ void Optimizer::reset()
   control_history_[2] = {0.0, 0.0, 0.0};
   control_history_[3] = {0.0, 0.0, 0.0};
 
-  UpdateVelocities();
-  // constrain_critic.updateMaxVel();
+  RCLCPP_INFO(logger_, "Params value reset");
+  auto & s = settings_;
+  s.constraints = s.base_constraints;
 
   costs_ = xt::zeros<float>({settings_.batch_size});
   generated_trajectories_.reset(settings_.batch_size, settings_.time_steps);
@@ -451,10 +452,6 @@ void Optimizer::setSpeedLimit(double speed_limit, bool percentage)
 models::Trajectories & Optimizer::getGeneratedTrajectories()
 {
   return generated_trajectories_;
-}
-
-void Optimizer::UpdateVelocities() {
-  setSpeedLimit(0.0, false); 
 }
 
 }  // namespace mppi
