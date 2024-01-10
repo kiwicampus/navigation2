@@ -27,6 +27,7 @@ void ConstraintCritic::initialize()
   RCLCPP_INFO(
     logger_, "ConstraintCritic instantiated with %d power and %f weight.",
     power_, weight_);
+  
   float vx_max, vy_max, vx_min;
   getParentParam(vx_max, "vx_max", 0.5);
   getParentParam(vy_max, "vy_max", 0.0);
