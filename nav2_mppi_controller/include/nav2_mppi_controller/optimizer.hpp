@@ -240,8 +240,6 @@ protected:
 
   std::shared_ptr<MotionModel> motion_model_;
 
-  // critics::ConstraintCritic constrain_critic;
-
   ParametersHandler * parameters_handler_;
   CriticManager critic_manager_;
   NoiseGenerator noise_generator_;
