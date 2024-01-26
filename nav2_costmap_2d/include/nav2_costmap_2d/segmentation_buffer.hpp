@@ -51,6 +51,186 @@
 #include "tf2_sensor_msgs/tf2_sensor_msgs.hpp"
 #include "vision_msgs/msg/label_info.hpp"
 
+struct TileIndex {
+    int x, y;
+
+    bool operator==(const TileIndex& other) const {
+        return x == other.x && y == other.y;
+    }
+};
+
+namespace std {
+    template<>
+    struct hash<TileIndex> {
+        size_t operator()(const TileIndex& coord) const {
+            // Compute individual hash values for two integers
+            // and combine them using bitwise XOR
+            // and bit shifting:
+            return std::hash<int>()(coord.x) ^ (std::hash<int>()(coord.y) << 1);
+        }
+    };
+}
+
+struct TileWorldXY
+{
+    double x, y;
+};
+
+struct TileObservation {
+    uint8_t class_id, class_cost;
+    float confidence;
+    double timestamp;
+};
+
+class TemporalObservationQueue {
+private:
+
+    std::queue<std::unique_ptr<TileObservation>> queue_;
+    float confidence_sum_ = 0.0f;
+    double decay_time_;
+
+public:
+    TemporalObservationQueue(){}
+
+    // Add an element with the current timestamp
+    void push(std::unique_ptr<TileObservation> tile_obs_ptr) {
+        if(tile_obs_ptr->class_id != getClassId())
+        {
+            std::queue<std::unique_ptr<TileObservation>> emptyQueue;
+            std::swap(queue_, emptyQueue);
+            confidence_sum_ = 0.0;
+        }
+        confidence_sum_ += tile_obs_ptr->confidence;
+        queue_.emplace(std::move(tile_obs_ptr));
+    }
+
+    // Remove the front element
+    void pop() {
+        if (!queue_.empty()) {
+            confidence_sum_ -= queue_.front()->confidence;
+            queue_.pop();
+        }
+    }
+
+    bool empty() {return queue_.empty();}
+
+    void setDecayTime(float decay_time)
+    {
+        decay_time_ = decay_time;
+    }
+
+    // Get the current sum of all elements
+    float getConfidenceSum() const {
+        return confidence_sum_;
+    }
+
+    uint8_t getClassId()
+    {
+        if(!queue_.empty())
+        {
+            return queue_.back()->class_id;
+        }
+        return 255;
+    }
+
+    uint8_t getClassCost()
+    {
+        if(!queue_.empty())
+        {
+            return queue_.back()->class_cost;
+        }
+        return 0;
+    }
+
+    // Remove elements older than a specified duration (in seconds)
+    void purgeOld() {
+        double newest_obs_stamp = queue_.back()->timestamp;
+
+        while (!queue_.empty()) {
+            double age = newest_obs_stamp - queue_.front()->timestamp;
+            if (age > decay_time_) {
+                pop();
+            } else {
+                break;
+            }
+        }
+    }
+};
+
+class SegmentationTileMap {
+    private:
+        std::unordered_map<TileIndex, TemporalObservationQueue> tile_map_;
+        float resolution_;
+        float decay_time_;
+
+    public:
+        // Define iterator types
+        using Iterator = typename std::unordered_map<TileIndex, TemporalObservationQueue>::iterator;
+        using ConstIterator = typename std::unordered_map<TileIndex, TemporalObservationQueue>::const_iterator;
+
+        SegmentationTileMap(float resolution, float decay_time) : resolution_(resolution), decay_time_(decay_time) {}
+        SegmentationTileMap(){}
+
+        // Return iterator to the beginning of the tile_map_
+        Iterator begin() { return tile_map_.begin(); }
+        ConstIterator begin() const { return tile_map_.begin(); }
+
+        // Return iterator to the end of the tile_map_
+        Iterator end() { return tile_map_.end(); }
+        ConstIterator end() const { return tile_map_.end(); }
+
+        int size()
+        {
+            return tile_map_.size();
+        }
+
+        TileIndex worldToIndex(double x, double y) const {
+            // Convert world coordinates to grid indices
+            int ix = static_cast<int>(std::floor(x / resolution_));
+            int iy = static_cast<int>(std::floor(y / resolution_));
+            return TileIndex{ix, iy};
+        }
+
+        TileWorldXY indexToWorld(TileIndex idx) const {
+            // Calculate the world coordinates of the center of the grid cell
+            double x = (static_cast<double>(idx.x) + 0.5) * resolution_;
+            double y = (static_cast<double>(idx.y) + 0.5) * resolution_;
+            return TileWorldXY{x, y};
+        }
+
+        void pushObservation(TileObservation& obs, TileIndex& idx)
+        {
+            auto it = tile_map_.find(idx);
+            if (it != tile_map_.end()) {
+                // TileIndex exists, push the observation
+                it->second.push(std::move(std::make_unique<TileObservation>(obs)));
+            } else {
+                // TileIndex does not exist, create a new TemporalObservationQueue with decay time
+                TemporalObservationQueue& queue = tile_map_[idx];
+                queue.setDecayTime(decay_time_);
+                queue.push(std::move(std::make_unique<TileObservation>(obs)));
+            }
+        }
+
+        void purgeOldObservations()
+        {
+            std::vector<TileIndex> tiles_to_remove;
+            for (auto& tile : tile_map_)
+            {
+                tile.second.purgeOld();
+                if(tile.second.empty())
+                {
+                    tiles_to_remove.emplace_back(tile.first);
+                }
+            }
+            for (auto& tile : tiles_to_remove)
+            {
+                tile_map_.erase(tile);
+            }
+        }
+};
+
+
 namespace nav2_costmap_2d {
 /**
  * @class SegmentationBuffer
@@ -89,7 +269,7 @@ class SegmentationBuffer
                        std::unordered_map<std::string, uint8_t> class_names_cost_map, double observation_keep_time,
                        double expected_update_rate, double max_lookahead_distance, double min_lookahead_distance,
                        tf2_ros::Buffer& tf2_buffer, std::string global_frame, std::string sensor_frame,
-                       tf2::Duration tf_tolerance);
+                       tf2::Duration tf_tolerance, double costmap_resolution);
 
     /**
      * @brief  Destructor... cleans up
@@ -154,6 +334,16 @@ class SegmentationBuffer
 
     void updateClassMap(std::string new_class, uint8_t new_cost);
 
+    SegmentationTileMap* getSegmentationTileMap()
+    {
+        return &temporal_tile_map_;
+    }
+
+    uint8_t getCostForClassId(uint8_t class_id)
+    {
+        return class_ids_cost_map_[class_id];
+    }
+
    private:
     /**
      * @brief  Removes any stale segmentations from the buffer list
@@ -177,6 +367,8 @@ class SegmentationBuffer
     double sq_max_lookahead_distance_;
     double sq_min_lookahead_distance_;
     tf2::Duration tf_tolerance_;
+
+    SegmentationTileMap temporal_tile_map_;
 };
 }  // namespace nav2_costmap_2d
 #endif  // NAV2_COSTMAP_2D__SEGMENTATION_BUFFER_HPP_

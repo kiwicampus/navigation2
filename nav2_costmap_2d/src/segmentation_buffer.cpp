@@ -52,7 +52,7 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
                                        double expected_update_rate, double max_lookahead_distance,
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
-                                       tf2::Duration tf_tolerance)
+                                       tf2::Duration tf_tolerance, double costmap_resolution)
   : tf2_buffer_(tf2_buffer)
   , class_types_(class_types)
   , class_names_cost_map_(class_names_cost_map)
@@ -69,6 +69,7 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   clock_ = node->get_clock();
   logger_ = node->get_logger();
   last_updated_ = node->now();
+  temporal_tile_map_ = SegmentationTileMap(costmap_resolution, observation_keep_time);
 }
 
 SegmentationBuffer::~SegmentationBuffer() {}
@@ -145,6 +146,8 @@ void SegmentationBuffer::bufferSegmentation(
     sensor_msgs::PointCloud2ConstIterator<float> iter_y_global(global_frame_cloud, "y");
     sensor_msgs::PointCloud2ConstIterator<float> iter_z_global(global_frame_cloud, "z");
     unsigned int point_count = 0;
+    std::unordered_map<TileIndex, int> best_observations_idxs;
+    double cloud_time_seconds = rclcpp::Time(cloud.header.stamp.sec, cloud.header.stamp.nanosec).seconds();
 
     // copy over the points that are within our segmentation range
     for (size_t v = 0; v < segmentation.height; v++)
@@ -153,24 +156,63 @@ void SegmentationBuffer::bufferSegmentation(
       {
         int pixel_idx = v * segmentation.width + u;
         // remove invalid points
-        if (!std::isfinite(*(iter_z_global + pixel_idx)))
+        if (!std::isfinite(*(iter_z_global)))
         {
+          ++iter_x_global;
+          ++iter_y_global;
+          ++iter_z_global;
           continue;
         }
         double sq_dist =
-          std::pow(*(iter_x_global + pixel_idx) - segmentation_list_.front().origin_.x, 2) +
-          std::pow(*(iter_y_global + pixel_idx) - segmentation_list_.front().origin_.y, 2) +
-          std::pow(*(iter_z_global + pixel_idx) - segmentation_list_.front().origin_.z, 2);
+          std::pow(*(iter_x_global) - segmentation_list_.front().origin_.x, 2) +
+          std::pow(*(iter_y_global) - segmentation_list_.front().origin_.y, 2) +
+          std::pow(*(iter_z_global) - segmentation_list_.front().origin_.z, 2);
         if (sq_dist >= sq_max_lookahead_distance_ || sq_dist <= sq_min_lookahead_distance_)
         {
+          ++iter_x_global;
+          ++iter_y_global;
+          ++iter_z_global;
           continue;
         }
-        *(iter_class_obs + point_count) = segmentation.data[pixel_idx];
-        *(iter_confidence_obs + point_count) = confidence.data[pixel_idx];
-        *(iter_x_obs + point_count) = *(iter_x_global + pixel_idx);
-        *(iter_y_obs + point_count) = *(iter_y_global + pixel_idx);
-        *(iter_z_obs + point_count) = *(iter_z_global + pixel_idx);
+
+        
+        *(iter_class_obs) = segmentation.data[pixel_idx];
+        *(iter_confidence_obs) = confidence.data[pixel_idx];
+        *(iter_x_obs) = *(iter_x_global);
+        *(iter_y_obs) = *(iter_y_global);
+        *(iter_z_obs) = *(iter_z_global);
         point_count++;
+
+        TileIndex costmap_index = temporal_tile_map_.worldToIndex(*iter_x_global, *iter_y_global);
+
+        // Update best observation for each TileIndex
+        auto it = best_observations_idxs.find(costmap_index);
+        if (it != best_observations_idxs.end()) {
+          best_observations_idxs[costmap_index] = pixel_idx;
+        }
+        else
+        {
+          if(confidence.data[pixel_idx] > confidence.data[best_observations_idxs[costmap_index]])
+          {
+            best_observations_idxs[costmap_index] = pixel_idx;
+          }
+        }
+        ++iter_x_global;
+        ++iter_y_global;
+        ++iter_z_global;
+        ++iter_x_obs;
+        ++iter_y_obs;
+        ++iter_z_obs;
+        ++iter_class_obs;
+        ++iter_confidence_obs;
+      }
+      // std::cout << "pushing " << best_observations_idxs.size() << " observations to tile map\n";
+      for (auto& idx : best_observations_idxs)
+      {
+        int img_idx_for_best_obs = idx.second;
+        TileIndex costmap_index = idx.first;
+        TileObservation best_obs{segmentation.data[img_idx_for_best_obs], getCostForClassId(segmentation.data[img_idx_for_best_obs]), static_cast<float>(confidence.data[img_idx_for_best_obs]), cloud_time_seconds};
+        temporal_tile_map_.pushObservation(best_obs, costmap_index);
       }
     }
 
@@ -216,6 +258,7 @@ std::unordered_map<std::string, uint8_t> SegmentationBuffer::getClassMap()
 {
   return class_names_cost_map_;
 }
+
 
 void SegmentationBuffer::purgeStaleSegmentations()
 {

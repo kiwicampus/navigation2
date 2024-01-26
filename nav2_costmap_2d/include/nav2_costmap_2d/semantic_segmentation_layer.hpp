@@ -39,6 +39,9 @@
 #ifndef SEMANTIC_SEGMENTATION_LAYER_HPP_
 #define SEMANTIC_SEGMENTATION_LAYER_HPP_
 
+#include <functional>
+#include <unordered_map>
+
 #include "rclcpp/rclcpp.hpp"
 
 #include "message_filters/subscriber.h"
@@ -54,8 +57,9 @@
 #include "tf2_ros/message_filter.h"
 #include "vision_msgs/msg/label_info.hpp"
 
-namespace nav2_costmap_2d {
+// Define your custom struct.
 
+namespace nav2_costmap_2d {
 /**
  * @class SemanticSegmentationLayer
  * @brief Takes in semantic segmentation messages and aligned pointclouds to populate the 2D costmap
@@ -113,10 +117,17 @@ class SemanticSegmentationLayer : public CostmapLayer
 
     bool getSegmentations(std::vector<nav2_costmap_2d::Segmentation>& segmentations) const;
 
+    bool getSegmentationTileMaps(std::vector<SegmentationTileMap*>& segmentation_tile_maps);
+
     rcl_interfaces::msg::SetParametersResult dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
 
    private:
     void syncSegmPointcloudCb(const std::shared_ptr<const sensor_msgs::msg::Image>& segmentation,
+                              const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
+                              const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer);
+
+    void syncSegmConfPointcloudCb(const std::shared_ptr<const sensor_msgs::msg::Image>& segmentation,
+                              const std::shared_ptr<const sensor_msgs::msg::Image>& confidence,
                               const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
                               const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer);
 
@@ -125,6 +136,8 @@ class SemanticSegmentationLayer : public CostmapLayer
 
     std::vector<std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image, rclcpp_lifecycle::LifecycleNode>>>
         semantic_segmentation_subs_;
+    std::vector<std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image, rclcpp_lifecycle::LifecycleNode>>>
+        semantic_segmentation_confidence_subs_;
     std::vector<
         std::shared_ptr<message_filters::Subscriber<vision_msgs::msg::LabelInfo, rclcpp_lifecycle::LifecycleNode>>>
         label_info_subs_;
@@ -134,6 +147,9 @@ class SemanticSegmentationLayer : public CostmapLayer
     std::vector<
         std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::PointCloud2>>>
         segm_pc_notifiers_;
+    std::vector<
+        std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::Image, sensor_msgs::msg::PointCloud2>>>
+        segm_conf_pc_notifiers_;
     std::vector<std::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>> pointcloud_tf_subs_;
 
     // debug publishers

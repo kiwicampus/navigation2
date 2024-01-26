@@ -66,7 +66,7 @@ void SemanticSegmentationLayer::onInitialize()
   {
     throw std::runtime_error{"Failed to lock node"};
   }
-  std::string segmentation_topic, pointcloud_topic, labels_topic, sensor_frame;
+  std::string segmentation_topic, confidence_topic, pointcloud_topic, labels_topic, sensor_frame;
   std::vector<std::string> class_types_string;
   double max_obstacle_distance, min_obstacle_distance, observation_keep_time, transform_tolerance,
     expected_update_rate;
@@ -102,6 +102,7 @@ void SemanticSegmentationLayer::onInitialize()
 
   while (ss >> source) {
     declareParameter(source + "." + "segmentation_topic", rclcpp::ParameterValue(""));
+    declareParameter(source + "." + "confidence_topic", rclcpp::ParameterValue(""));
     declareParameter(source + "." + "labels_topic", rclcpp::ParameterValue(""));
     declareParameter(source + "." + "pointcloud_topic", rclcpp::ParameterValue(""));
     declareParameter(source + "." + "observation_persistence", rclcpp::ParameterValue(0.0));
@@ -112,6 +113,7 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "min_obstacle_distance", rclcpp::ParameterValue(0.3));
     
     node->get_parameter(name_ + "." + source + "." + "segmentation_topic", segmentation_topic);
+    node->get_parameter(name_ + "." + source + "." + "confidence_topic", confidence_topic);
     node->get_parameter(name_ + "." + source + "." + "labels_topic", labels_topic);
     node->get_parameter(name_ + "." + source + "." + "pointcloud_topic", pointcloud_topic);
     node->get_parameter(name_ + "." + source + "." + "observation_persistence", observation_keep_time);
@@ -171,7 +173,7 @@ void SemanticSegmentationLayer::onInitialize()
     auto segmentation_buffer = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
       node, source, class_types_string, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
       min_obstacle_distance, *tf_, global_frame_, sensor_frame,
-      tf2::durationFromSec(transform_tolerance));
+      tf2::durationFromSec(transform_tolerance), getResolution());
 
     segmentation_buffers_.push_back(segmentation_buffer);
     
@@ -180,9 +182,6 @@ void SemanticSegmentationLayer::onInitialize()
       std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image, rclcpp_lifecycle::LifecycleNode>>(
         node, segmentation_topic, custom_qos_profile, sub_opt);
     semantic_segmentation_subs_.push_back(semantic_segmentation_sub);
-    // semantic_segmentation_sub->registerCallback([&](std::shared_ptr<const sensor_msgs::msg::Image> /*msg*/){
-    //   std::cout << "got sgm" << std::endl;
-    // });
 
     auto label_info_sub = std::make_shared<message_filters::Subscriber<vision_msgs::msg::LabelInfo, rclcpp_lifecycle::LifecycleNode>>(
         node, labels_topic, tl_qos, tl_sub_opt);
@@ -192,27 +191,39 @@ void SemanticSegmentationLayer::onInitialize()
     auto pointcloud_sub = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>(
       node, pointcloud_topic, custom_qos_profile, sub_opt);
     pointcloud_subs_.push_back(pointcloud_sub);
-    // pointcloud_sub->registerCallback([&](std::shared_ptr<const sensor_msgs::msg::PointCloud2> /*msg*/){
-    //   std::cout << "got pc" << std::endl;
-    // });
 
     auto pointcloud_tf_sub = std::make_shared<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>(
       *pointcloud_subs_.back(), *tf_, global_frame_, 1000, node->get_node_logging_interface(),
           node->get_node_clock_interface(),
           tf2::durationFromSec(transform_tolerance));
-    // pointcloud_tf_sub->registerCallback([&](std::shared_ptr<const sensor_msgs::msg::PointCloud2> /*msg*/){
-    //   std::cout << "got pc tf" << std::endl;
-    // });
     pointcloud_tf_subs_.push_back(pointcloud_tf_sub);
-    
-    auto segm_pc_sync =
-      std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::Image,
-                                                        sensor_msgs::msg::PointCloud2>>(
-        *semantic_segmentation_subs_.back(), *pointcloud_tf_subs_.back(), 1000);
-    segm_pc_sync->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this,
-                                              std::placeholders::_1, std::placeholders::_2, segmentation_buffers_.back()));
 
-    segm_pc_notifiers_.push_back(segm_pc_sync);
+    if(!confidence_topic.empty())
+    {
+      auto semantic_segmentation_confidence_sub =
+      std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Image, rclcpp_lifecycle::LifecycleNode>>(
+        node, confidence_topic, custom_qos_profile, sub_opt);
+      semantic_segmentation_confidence_subs_.push_back(semantic_segmentation_confidence_sub);
+      auto segm_conf_pc_sync =
+        std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::Image,
+                                                          sensor_msgs::msg::PointCloud2>>(
+          *semantic_segmentation_subs_.back(), *semantic_segmentation_confidence_subs_.back(), *pointcloud_tf_subs_.back(), 1000);
+      segm_conf_pc_sync->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmConfPointcloudCb, this,
+                                                std::placeholders::_1, std::placeholders::_2, std::placeholders::_3, segmentation_buffers_.back()));
+      segm_conf_pc_notifiers_.push_back(segm_conf_pc_sync);
+       RCLCPP_INFO(logger_, "Confidence is enabled for source %s", source.c_str());
+    }
+    else
+    {
+      RCLCPP_WARN(logger_, "Confidence topic was empty for source %s, not using segmentation confidence in that source", source.c_str());
+      auto segm_pc_sync =
+        std::make_shared<message_filters::TimeSynchronizer<sensor_msgs::msg::Image,
+                                                          sensor_msgs::msg::PointCloud2>>(
+          *semantic_segmentation_subs_.back(), *pointcloud_tf_subs_.back(), 1000);
+      segm_pc_sync->registerCallback(std::bind(&SemanticSegmentationLayer::syncSegmPointcloudCb, this,
+                                                std::placeholders::_1, std::placeholders::_2, segmentation_buffers_.back()));
+      segm_pc_notifiers_.push_back(segm_pc_sync);
+    }
   }
 
   dyn_params_handler_ = node->add_on_set_parameters_callback(
@@ -238,39 +249,60 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
   {
     return;
   }
+
+  std::vector<SegmentationTileMap*> segmentation_tile_maps;
+  getSegmentationTileMaps(segmentation_tile_maps);
+  for (auto& tile_map : segmentation_tile_maps)
+  {
+    for(auto& tile: *tile_map)
+    {
+      TileWorldXY tile_world_coords = tile_map->indexToWorld(tile.first);
+      unsigned int mx, my;
+      if (!worldToMap(tile_world_coords.x, tile_world_coords.y, mx, my))
+      {
+        RCLCPP_DEBUG(logger_, "Computing map coords failed");
+        continue;
+      }
+      unsigned int index = getIndex(mx, my);
+      costmap_[index] = tile.second.getClassCost();
+      touch(tile_world_coords.x, tile_world_coords.y, min_x, min_y, max_x, max_y);
+    }
+    tile_map->purgeOldObservations();
+  }
+  
   std::vector<nav2_costmap_2d::Segmentation> segmentations;
   getSegmentations(segmentations);
 
 
   current_ = true;
 
-  for (auto& segmentation : segmentations)
-  {
-    sensor_msgs::PointCloud2ConstIterator<float> iter_x(*segmentation.cloud_, "x");
-    sensor_msgs::PointCloud2ConstIterator<float> iter_y(*segmentation.cloud_, "y");
-    sensor_msgs::PointCloud2ConstIterator<uint8_t> iter_class(*segmentation.cloud_, "class");
-    // sensor_msgs::PointCloud2ConstIterator<uint8_t> iter_confidence(*segmentation.cloud_,
-    // "confidence");
-    for (size_t point = 0; point < segmentation.cloud_->height * segmentation.cloud_->width;
-         point++)
-    {
-      unsigned int mx, my;
-      if (!worldToMap(*(iter_x + point), *(iter_y + point), mx, my))
-      {
-        RCLCPP_DEBUG(logger_, "Computing map coords failed");
-        continue;
-      }
-      unsigned int index = getIndex(mx, my);
-      uint8_t class_id = *(iter_class + point);
-      if (!segmentation.class_map_.count(class_id))
-      {
-        RCLCPP_DEBUG(logger_, "Cost for class id %i was not defined, skipping", class_id);
-        continue;
-      }
-      costmap_[index] = segmentation.class_map_[class_id];
-      touch(*(iter_x + point), *(iter_y + point), min_x, min_y, max_x, max_y);
-    }
-  }
+  // for (auto& segmentation : segmentations)
+  // {
+  //   sensor_msgs::PointCloud2ConstIterator<float> iter_x(*segmentation.cloud_, "x");
+  //   sensor_msgs::PointCloud2ConstIterator<float> iter_y(*segmentation.cloud_, "y");
+  //   sensor_msgs::PointCloud2ConstIterator<uint8_t> iter_class(*segmentation.cloud_, "class");
+  //   // sensor_msgs::PointCloud2ConstIterator<uint8_t> iter_confidence(*segmentation.cloud_,
+  //   // "confidence");
+  //   for (size_t point = 0; point < segmentation.cloud_->height * segmentation.cloud_->width;
+  //        point++)
+  //   {
+  //     unsigned int mx, my;
+  //     if (!worldToMap(*(iter_x + point), *(iter_y + point), mx, my))
+  //     {
+  //       RCLCPP_DEBUG(logger_, "Computing map coords failed");
+  //       continue;
+  //     }
+  //     unsigned int index = getIndex(mx, my);
+  //     uint8_t class_id = *(iter_class + point);
+  //     if (!segmentation.class_map_.count(class_id))
+  //     {
+  //       RCLCPP_DEBUG(logger_, "Cost for class id %i was not defined, skipping", class_id);
+  //       continue;
+  //     }
+  //     costmap_[index] = segmentation.class_map_[class_id];
+  //     touch(*(iter_x + point), *(iter_y + point), min_x, min_y, max_x, max_y);
+  //   }
+  // }
 }
 
 // The method is called when footprint was changed.
@@ -360,6 +392,41 @@ void SemanticSegmentationLayer::syncSegmPointcloudCb(
   buffer->unlock();
 }
 
+void SemanticSegmentationLayer::syncSegmConfPointcloudCb(const std::shared_ptr<const sensor_msgs::msg::Image>& segmentation,
+                              const std::shared_ptr<const sensor_msgs::msg::Image>& confidence,
+                              const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
+                              const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer)
+{
+  if (segmentation->width * segmentation->height != pointcloud->width * pointcloud->height)
+    {
+      RCLCPP_WARN(logger_,
+                  "Pointcloud and segmentation sizes are different, will not buffer message. "
+                  "segmentation->width:%u,  "
+                  "segmentation->height:%u, pointcloud->width:%u, pointcloud->height:%u",
+                  segmentation->width, segmentation->height, pointcloud->width, pointcloud->height);
+      return;
+    }
+    unsigned expected_array_size = segmentation->width * segmentation->height;
+    if (segmentation->data.size() < expected_array_size)
+    {
+      RCLCPP_WARN(logger_,
+                  "segmentation arrays have wrong sizes: data->%lu, expected->%u. "
+                  "Will not buffer message",
+                  segmentation->data.size(), expected_array_size);
+      return;
+    }
+    if (buffer->isClassIdCostMapEmpty())
+    {
+      RCLCPP_WARN(logger_, "Class map is empty because a labelinfo message has not been received for topic %s. Will not buffer message", buffer->getBufferSource().c_str());
+      return;
+    }
+    buffer->lock();
+    // we are passing the segmentation as confidence temporarily while we figure out a good use for getting
+    // confidence maps
+    buffer->bufferSegmentation(*pointcloud, *segmentation, *confidence);
+    buffer->unlock();
+}
+
 void SemanticSegmentationLayer::reset()
 {
   resetMaps();
@@ -369,17 +436,31 @@ void SemanticSegmentationLayer::reset()
 
 bool SemanticSegmentationLayer::getSegmentations(
     std::vector<nav2_costmap_2d::Segmentation> & segmentations) const
-    {
-      bool current = true;
-      // get the marking observations
-      for (unsigned int i = 0; i < segmentation_buffers_.size(); ++i) {
-        segmentation_buffers_[i]->lock();
-        segmentation_buffers_[i]->getSegmentations(segmentations);
-        current = segmentation_buffers_[i]->isCurrent() && current;
-        segmentation_buffers_[i]->unlock();
-      }
-      return current;
-    }
+{
+  bool current = true;
+  // get the marking observations
+  for (unsigned int i = 0; i < segmentation_buffers_.size(); ++i) {
+    segmentation_buffers_[i]->lock();
+    segmentation_buffers_[i]->getSegmentations(segmentations);
+    current = segmentation_buffers_[i]->isCurrent() && current;
+    segmentation_buffers_[i]->unlock();
+  }
+  return current;
+}
+
+bool SemanticSegmentationLayer::getSegmentationTileMaps(
+    std::vector<SegmentationTileMap*>& segmentation_tile_maps)
+{
+  bool current = true;
+  // get the marking observations
+  for (unsigned int i = 0; i < segmentation_buffers_.size(); ++i) {
+    segmentation_buffers_[i]->lock();
+    SegmentationTileMap* tile_map = segmentation_buffers_[i]->getSegmentationTileMap();
+    segmentation_tile_maps.emplace_back(tile_map);
+    segmentation_buffers_[i]->unlock();
+  }
+  return current;
+}
 
   rcl_interfaces::msg::SetParametersResult
 SemanticSegmentationLayer::dynamicParametersCallback(
