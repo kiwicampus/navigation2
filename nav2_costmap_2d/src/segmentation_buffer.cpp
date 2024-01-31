@@ -44,6 +44,7 @@
 
 #include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "tf2/convert.h"
+#include "rclcpp/rclcpp.hpp"
 using namespace std::chrono_literals;
 
 namespace nav2_costmap_2d {
@@ -69,7 +70,8 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   clock_ = node->get_clock();
   logger_ = node->get_logger();
   last_updated_ = node->now();
-  temporal_tile_map_ = SegmentationTileMap(costmap_resolution, observation_keep_time);
+  temporal_tile_map_ = std::make_shared<SegmentationTileMap>(costmap_resolution, 5.0);
+  debug_pub_ = rclcpp::Node("test").create_publisher<sensor_msgs::msg::PointCloud2>("debug_cloud",1);
 }
 
 SegmentationBuffer::~SegmentationBuffer() {}
@@ -183,19 +185,19 @@ void SegmentationBuffer::bufferSegmentation(
         *(iter_z_obs) = *(iter_z_global);
         point_count++;
 
-        TileIndex costmap_index = temporal_tile_map_.worldToIndex(*iter_x_global, *iter_y_global);
+        TileIndex costmap_index = temporal_tile_map_->worldToIndex(*iter_x_global, *iter_y_global);
 
         // Update best observation for each TileIndex
         auto it = best_observations_idxs.find(costmap_index);
         if (it != best_observations_idxs.end()) {
-          best_observations_idxs[costmap_index] = pixel_idx;
-        }
-        else
-        {
           if(confidence.data[pixel_idx] > confidence.data[best_observations_idxs[costmap_index]])
           {
             best_observations_idxs[costmap_index] = pixel_idx;
           }
+        }
+        else
+        {
+          best_observations_idxs[costmap_index] = pixel_idx;
         }
         ++iter_x_global;
         ++iter_y_global;
@@ -206,20 +208,25 @@ void SegmentationBuffer::bufferSegmentation(
         ++iter_class_obs;
         ++iter_confidence_obs;
       }
-      // std::cout << "pushing " << best_observations_idxs.size() << " observations to tile map\n";
-      for (auto& idx : best_observations_idxs)
-      {
-        int img_idx_for_best_obs = idx.second;
-        TileIndex costmap_index = idx.first;
-        TileObservation best_obs{segmentation.data[img_idx_for_best_obs], getCostForClassId(segmentation.data[img_idx_for_best_obs]), static_cast<float>(confidence.data[img_idx_for_best_obs]), cloud_time_seconds};
-        temporal_tile_map_.pushObservation(best_obs, costmap_index);
-      }
     }
+    std::cout << std::setprecision(15) << "pushing " << best_observations_idxs.size() << " observations to tile map with time" << cloud_time_seconds << "\n";
+    temporal_tile_map_->lock();
+    temporal_tile_map_->purgeOldObservations(cloud_time_seconds);
+    for (auto& idx : best_observations_idxs)
+    {
+      int img_idx_for_best_obs = idx.second;
+      TileIndex costmap_index = idx.first;
+      TileObservation best_obs{segmentation.data[img_idx_for_best_obs], getCostForClassId(segmentation.data[img_idx_for_best_obs]), static_cast<float>(confidence.data[img_idx_for_best_obs]), cloud_time_seconds};
+      temporal_tile_map_->pushObservation(best_obs, costmap_index);
+    }
+    temporal_tile_map_->unlock();
 
     // resize the cloud for the number of legal points
     modifier.resize(point_count);
     segmentation_cloud.header.stamp = cloud.header.stamp;
     segmentation_cloud.header.frame_id = global_frame_cloud.header.frame_id;
+    sensor_msgs::msg::PointCloud2 queue_cloud = visualizeTemporalTileMap(*temporal_tile_map_);
+    debug_pub_->publish(queue_cloud);
 
     segmentation_list_.front().class_map_ = class_ids_cost_map_;
   } catch (tf2::TransformException& ex)

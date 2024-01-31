@@ -250,10 +250,11 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
     return;
   }
 
-  std::vector<SegmentationTileMap*> segmentation_tile_maps;
+  std::vector<SegmentationTileMap::SharedPtr> segmentation_tile_maps;
   getSegmentationTileMaps(segmentation_tile_maps);
   for (auto& tile_map : segmentation_tile_maps)
   {
+    std::cout << " Processing tile map of size " << tile_map->size() << std::endl;
     for(auto& tile: *tile_map)
     {
       TileWorldXY tile_world_coords = tile_map->indexToWorld(tile.first);
@@ -267,7 +268,6 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
       costmap_[index] = tile.second.getClassCost();
       touch(tile_world_coords.x, tile_world_coords.y, min_x, min_y, max_x, max_y);
     }
-    tile_map->purgeOldObservations();
   }
   
   std::vector<nav2_costmap_2d::Segmentation> segmentations;
@@ -449,13 +449,13 @@ bool SemanticSegmentationLayer::getSegmentations(
 }
 
 bool SemanticSegmentationLayer::getSegmentationTileMaps(
-    std::vector<SegmentationTileMap*>& segmentation_tile_maps)
+    std::vector<SegmentationTileMap::SharedPtr>& segmentation_tile_maps)
 {
   bool current = true;
   // get the marking observations
   for (unsigned int i = 0; i < segmentation_buffers_.size(); ++i) {
     segmentation_buffers_[i]->lock();
-    SegmentationTileMap* tile_map = segmentation_buffers_[i]->getSegmentationTileMap();
+    SegmentationTileMap::SharedPtr tile_map = segmentation_buffers_[i]->getSegmentationTileMap();
     segmentation_tile_maps.emplace_back(tile_map);
     segmentation_buffers_[i]->unlock();
   }

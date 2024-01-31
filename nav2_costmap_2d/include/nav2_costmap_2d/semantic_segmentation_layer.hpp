@@ -117,7 +117,7 @@ class SemanticSegmentationLayer : public CostmapLayer
 
     bool getSegmentations(std::vector<nav2_costmap_2d::Segmentation>& segmentations) const;
 
-    bool getSegmentationTileMaps(std::vector<SegmentationTileMap*>& segmentation_tile_maps);
+    bool getSegmentationTileMaps(std::vector<SegmentationTileMap::SharedPtr>& segmentation_tile_maps);
 
     rcl_interfaces::msg::SetParametersResult dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
 

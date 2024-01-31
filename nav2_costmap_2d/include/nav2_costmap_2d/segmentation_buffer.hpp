@@ -77,6 +77,8 @@ struct TileWorldXY
 };
 
 struct TileObservation {
+    using UniquePtr = std::unique_ptr<TileObservation>;
+
     uint8_t class_id, class_cost;
     float confidence;
     double timestamp;
@@ -85,34 +87,37 @@ struct TileObservation {
 class TemporalObservationQueue {
 private:
 
-    std::queue<std::unique_ptr<TileObservation>> queue_;
+    // std::deque<TileObservation> queue_;
     float confidence_sum_ = 0.0f;
     double decay_time_;
 
 public:
+std::deque<TileObservation> queue_;
     TemporalObservationQueue(){}
 
     // Add an element with the current timestamp
-    void push(std::unique_ptr<TileObservation> tile_obs_ptr) {
-        if(tile_obs_ptr->class_id != getClassId())
+    void push(TileObservation tile_obs) {
+        if(tile_obs.class_id != getClassId())
         {
-            std::queue<std::unique_ptr<TileObservation>> emptyQueue;
+            std::deque<TileObservation> emptyQueue;
             std::swap(queue_, emptyQueue);
             confidence_sum_ = 0.0;
         }
-        confidence_sum_ += tile_obs_ptr->confidence;
-        queue_.emplace(std::move(tile_obs_ptr));
+        confidence_sum_ += tile_obs.confidence;
+        queue_.push_back(tile_obs);
     }
 
     // Remove the front element
     void pop() {
         if (!queue_.empty()) {
-            confidence_sum_ -= queue_.front()->confidence;
-            queue_.pop();
+            confidence_sum_ -= queue_.front().confidence;
+            queue_.pop_front();
         }
     }
 
     bool empty() {return queue_.empty();}
+
+    int size() { return queue_.size(); }
 
     void setDecayTime(float decay_time)
     {
@@ -124,30 +129,28 @@ public:
         return confidence_sum_;
     }
 
-    uint8_t getClassId()
+    uint8_t getClassId() const
     {
         if(!queue_.empty())
         {
-            return queue_.back()->class_id;
+            return queue_.back().class_id;
         }
         return 255;
     }
 
-    uint8_t getClassCost()
+    uint8_t getClassCost() const
     {
         if(!queue_.empty())
         {
-            return queue_.back()->class_cost;
+            return queue_.back().class_cost;
         }
         return 0;
     }
 
     // Remove elements older than a specified duration (in seconds)
-    void purgeOld() {
-        double newest_obs_stamp = queue_.back()->timestamp;
-
+    void purgeOld(double current_time) {
         while (!queue_.empty()) {
-            double age = newest_obs_stamp - queue_.front()->timestamp;
+            double age = current_time - queue_.front().timestamp;
             if (age > decay_time_) {
                 pop();
             } else {
@@ -162,13 +165,19 @@ class SegmentationTileMap {
         std::unordered_map<TileIndex, TemporalObservationQueue> tile_map_;
         float resolution_;
         float decay_time_;
+        std::recursive_mutex lock_;
+
 
     public:
+        using SharedPtr = std::shared_ptr<SegmentationTileMap>;
+
         // Define iterator types
         using Iterator = typename std::unordered_map<TileIndex, TemporalObservationQueue>::iterator;
         using ConstIterator = typename std::unordered_map<TileIndex, TemporalObservationQueue>::const_iterator;
 
-        SegmentationTileMap(float resolution, float decay_time) : resolution_(resolution), decay_time_(decay_time) {}
+        SegmentationTileMap(float resolution, float decay_time) : resolution_(resolution), decay_time_(decay_time) {
+            tile_map_.reserve(1e4);
+        }
         SegmentationTileMap(){}
 
         // Return iterator to the beginning of the tile_map_
@@ -178,6 +187,16 @@ class SegmentationTileMap {
         // Return iterator to the end of the tile_map_
         Iterator end() { return tile_map_.end(); }
         ConstIterator end() const { return tile_map_.end(); }
+
+        /**
+        * @brief  Lock the segmentation buffer
+        */
+        inline void lock() { lock_.lock(); }
+
+        /**
+         * @brief  Lock the segmentation buffer
+         */
+        inline void unlock() { lock_.unlock(); }
 
         int size()
         {
@@ -203,32 +222,116 @@ class SegmentationTileMap {
             auto it = tile_map_.find(idx);
             if (it != tile_map_.end()) {
                 // TileIndex exists, push the observation
-                it->second.push(std::move(std::make_unique<TileObservation>(obs)));
+                it->second.push(obs);
             } else {
                 // TileIndex does not exist, create a new TemporalObservationQueue with decay time
                 TemporalObservationQueue& queue = tile_map_[idx];
                 queue.setDecayTime(decay_time_);
-                queue.push(std::move(std::make_unique<TileObservation>(obs)));
+                queue.push(obs);
             }
         }
 
-        void purgeOldObservations()
+        void purgeOldObservations(double current_time)
         {
             std::vector<TileIndex> tiles_to_remove;
             for (auto& tile : tile_map_)
             {
-                tile.second.purgeOld();
+                tile.second.purgeOld(current_time);
                 if(tile.second.empty())
                 {
                     tiles_to_remove.emplace_back(tile.first);
                 }
             }
+            std::cout << "erasing " << tiles_to_remove.size() << " tiles\n";
+            if(tile_map_.size() > 0)
+                std::cout << std::setprecision(15) << "first obs age " << tile_map_.begin()->second.size() << " and size is " << " t1 " <<  tile_map_.begin()->second.queue_.back().timestamp << " t2 " <<  tile_map_.begin()->second.queue_.back().timestamp << std::endl;
             for (auto& tile : tiles_to_remove)
             {
                 tile_map_.erase(tile);
             }
         }
 };
+
+struct PointData {
+    float x, y, z;
+    float confidence, confidence_sum;
+    uint8_t class_id;
+};
+
+sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(const SegmentationTileMap& tileMap) {
+    sensor_msgs::msg::PointCloud2 cloud;
+    cloud.header.frame_id = "map";  // Set appropriate frame_id
+    cloud.header.stamp = rclcpp::Clock().now();  // Set current time as timestamp
+
+    // Define fields for PointCloud2
+    sensor_msgs::PointCloud2Modifier modifier(cloud);
+    modifier.setPointCloud2Fields(6, "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+                                     "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+                                     "z", 1, sensor_msgs::msg::PointField::FLOAT32,
+                                     "confidence", 1, sensor_msgs::msg::PointField::FLOAT32,
+                                     "confidence_sum", 1, sensor_msgs::msg::PointField::FLOAT32,
+                                     "class", 1, sensor_msgs::msg::PointField::UINT8);
+
+    // Reserve space for points
+    std::vector<PointData> points;
+    // for (const auto& tile : tileMap) {
+    //     TileIndex idx = tile.first;
+    //     TileWorldXY worldXY = tileMap.indexToWorld(idx);
+    //     double z = 0.0;
+
+    //     for (const auto& obs : tile.second.queue_) {
+    //         PointData point;
+    //         point.x = worldXY.x;
+    //         point.y = worldXY.y;
+    //         point.z = z;
+    //         point.confidence = obs.confidence;
+    //         point.confidence_sum = tile.second.getConfidenceSum();
+    //         point.class_id = static_cast<uint8_t>(obs.class_id);
+    //         points.push_back(point);
+    //         z += 0.02;  // Increment Z by 0.1m for each observation
+    //     }
+    // }
+    for (const auto& tile : tileMap) {
+        TileIndex idx = tile.first;
+        TileWorldXY worldXY = tileMap.indexToWorld(idx);
+        double z = 0.0;
+        double z_limit = tile.second.getConfidenceSum() / 20000.0;
+
+        while(z < z_limit)
+        {
+            PointData point;
+            point.x = worldXY.x;
+            point.y = worldXY.y;
+            point.z = z;
+            point.confidence = std::log2(tile.second.getConfidenceSum());
+            point.confidence_sum = tile.second.getConfidenceSum();
+            point.class_id = tile.second.getClassId();
+            points.push_back(point);
+            z += 0.02;  // Increment Z by 0.1m for each observation
+        }
+    }
+
+    // Set data in PointCloud2
+    modifier.resize(points.size());  // Number of points
+    sensor_msgs::PointCloud2Iterator<float> iter_x(cloud, "x");
+    sensor_msgs::PointCloud2Iterator<float> iter_y(cloud, "y");
+    sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
+    sensor_msgs::PointCloud2Iterator<float> iter_confidence(cloud, "confidence");
+    sensor_msgs::PointCloud2Iterator<float> iter_confidence_sum(cloud, "confidence_sum");
+    sensor_msgs::PointCloud2Iterator<uint8_t> iter_class(cloud, "class");
+
+    for (const auto& point : points) {
+        *iter_x = point.x;
+        *iter_y = point.y;
+        *iter_z = point.z;
+        *iter_confidence = point.confidence;
+        *iter_confidence_sum = point.confidence_sum;
+        *iter_class = point.class_id;
+        ++iter_x; ++iter_y; ++iter_z; ++iter_confidence;++iter_confidence_sum; ++iter_class;
+    }
+
+    return cloud;
+}
 
 
 namespace nav2_costmap_2d {
@@ -334,9 +437,9 @@ class SegmentationBuffer
 
     void updateClassMap(std::string new_class, uint8_t new_cost);
 
-    SegmentationTileMap* getSegmentationTileMap()
+    SegmentationTileMap::SharedPtr getSegmentationTileMap()
     {
-        return &temporal_tile_map_;
+        return temporal_tile_map_;
     }
 
     uint8_t getCostForClassId(uint8_t class_id)
@@ -368,7 +471,10 @@ class SegmentationBuffer
     double sq_min_lookahead_distance_;
     tf2::Duration tf_tolerance_;
 
-    SegmentationTileMap temporal_tile_map_;
+    SegmentationTileMap::SharedPtr temporal_tile_map_;
+
+
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr debug_pub_;
 };
 }  // namespace nav2_costmap_2d
 #endif  // NAV2_COSTMAP_2D__SEGMENTATION_BUFFER_HPP_
