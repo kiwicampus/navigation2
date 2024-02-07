@@ -16,7 +16,6 @@ nav2_package()
 # TODO(jwallace42): This is a work around for https://github.com/ros2/rosidl_typesupport_fastrtps/issues/28
 add_compile_options(-Wno-error=deprecated)
 
-
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CollisionMonitorState.msg"
   "msg/CollisionDetectorState.msg"
