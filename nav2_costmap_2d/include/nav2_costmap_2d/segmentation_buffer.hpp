@@ -115,9 +115,9 @@ std::deque<TileObservation> queue_;
         }
     }
 
-    bool empty() {return queue_.empty();}
+    bool empty() const {return queue_.empty();}
 
-    int size() { return queue_.size(); }
+    int size() const { return queue_.size(); }
 
     void setDecayTime(float decay_time)
     {
@@ -274,42 +274,42 @@ sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(const SegmentationTileMap
 
     // Reserve space for points
     std::vector<PointData> points;
-    // for (const auto& tile : tileMap) {
-    //     TileIndex idx = tile.first;
-    //     TileWorldXY worldXY = tileMap.indexToWorld(idx);
-    //     double z = 0.0;
-
-    //     for (const auto& obs : tile.second.queue_) {
-    //         PointData point;
-    //         point.x = worldXY.x;
-    //         point.y = worldXY.y;
-    //         point.z = z;
-    //         point.confidence = obs.confidence;
-    //         point.confidence_sum = tile.second.getConfidenceSum();
-    //         point.class_id = static_cast<uint8_t>(obs.class_id);
-    //         points.push_back(point);
-    //         z += 0.02;  // Increment Z by 0.1m for each observation
-    //     }
-    // }
     for (const auto& tile : tileMap) {
         TileIndex idx = tile.first;
         TileWorldXY worldXY = tileMap.indexToWorld(idx);
         double z = 0.0;
-        double z_limit = tile.second.getConfidenceSum() / 20000.0;
 
-        while(z < z_limit)
-        {
+        for (const auto& obs : tile.second.queue_) {
             PointData point;
             point.x = worldXY.x;
             point.y = worldXY.y;
             point.z = z;
-            point.confidence = std::log2(tile.second.getConfidenceSum());
-            point.confidence_sum = tile.second.getConfidenceSum();
-            point.class_id = tile.second.getClassId();
+            point.confidence = obs.confidence;
+            point.confidence_sum = tile.second.getConfidenceSum() / tile.second.size();
+            point.class_id = static_cast<uint8_t>(obs.class_id);
             points.push_back(point);
             z += 0.02;  // Increment Z by 0.1m for each observation
         }
     }
+    // for (const auto& tile : tileMap) {
+    //     TileIndex idx = tile.first;
+    //     TileWorldXY worldXY = tileMap.indexToWorld(idx);
+    //     double z = 0.0;
+    //     double z_limit = tile.second.getConfidenceSum() / 20000.0;
+
+    //     while(z < z_limit)
+    //     {
+    //         PointData point;
+    //         point.x = worldXY.x;
+    //         point.y = worldXY.y;
+    //         point.z = z;
+    //         point.confidence = tile.second.getConfidenceSum() / tile.second.size();
+    //         point.confidence_sum = tile.second.getConfidenceSum();
+    //         point.class_id = tile.second.getClassId();
+    //         points.push_back(point);
+    //         z += 0.02;  // Increment Z by 0.1m for each observation
+    //     }
+    // }
 
     // Set data in PointCloud2
     modifier.resize(points.size());  // Number of points

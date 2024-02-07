@@ -265,7 +265,37 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
         continue;
       }
       unsigned int index = getIndex(mx, my);
-      costmap_[index] = tile.second.getClassCost();
+      switch (tile.second.getClassId())
+      {
+      case 0:
+        if(tile.second.getConfidenceSum() / tile.second.size() > 215.0 && tile.second.size()>=5)
+        {
+          costmap_[index] = tile.second.getClassCost();
+        }
+        break;
+      case 1:
+        costmap_[index] = tile.second.getClassCost();
+        break;
+      case 2:
+        if(tile.second.getConfidenceSum() / tile.second.size() > 180.0 && tile.second.size()>=3)
+        {
+          costmap_[index] = tile.second.getClassCost();
+        }
+        break;
+      case 6:
+        if(tile.second.getConfidenceSum() / tile.second.size() > 225.0 && tile.second.size()>=5)
+        {
+          costmap_[index] = tile.second.getClassCost();
+        }
+        break;
+      default:
+        if(tile.second.getConfidenceSum() / tile.second.size() > 204.0 && tile.second.size()>=5)
+        {
+          costmap_[index] = tile.second.getClassCost();
+        }
+        break;
+      }
+      
       touch(tile_world_coords.x, tile_world_coords.y, min_x, min_y, max_x, max_y);
     }
   }
