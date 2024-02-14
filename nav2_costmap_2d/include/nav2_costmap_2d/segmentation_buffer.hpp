@@ -41,7 +41,6 @@
 #include <string>
 #include <vector>
 
-#include "nav2_costmap_2d/segmentation.hpp"
 #include "nav2_util/lifecycle_node.hpp"
 #include "rclcpp/time.hpp"
 #include "sensor_msgs/msg/image.hpp"
@@ -51,6 +50,27 @@
 #include "tf2_sensor_msgs/tf2_sensor_msgs.hpp"
 #include "vision_msgs/msg/label_info.hpp"
 
+/**
+ * @brief Represents the parameters associated with the cost calculation for a given class
+ */
+struct CostHeuristicParams
+{
+ uint8_t base_cost, max_cost, mark_confidence;
+ int samples_to_max_cost;
+};
+
+/**
+ * @brief Represents the parameters associated with the cost calculation for a given class
+ */
+struct ClassToCostManager
+{
+ uint8_t base_cost, max_cost, mark_confidence;
+ int samples_to_max_cost;
+};
+
+/**
+ * @brief Represents a 2D grid index with equality comparison. Supports negative indexes
+ */
 struct TileIndex {
     int x, y;
 
@@ -60,6 +80,9 @@ struct TileIndex {
 };
 
 namespace std {
+    /**
+     * @brief Custom hash function for TileIndex to enable its use as a key in unordered_map.
+     */
     template<>
     struct hash<TileIndex> {
         size_t operator()(const TileIndex& coord) const {
@@ -71,31 +94,44 @@ namespace std {
     };
 }
 
+
+/**
+ * @brief Represents the world coordinates of a tile.
+ */
 struct TileWorldXY
 {
     double x, y;
 };
 
+/**
+ * @brief Encapsulates the observation data for a tile, including class ID, cost, confidence, and timestamp.
+ */
 struct TileObservation {
     using UniquePtr = std::unique_ptr<TileObservation>;
 
-    uint8_t class_id, class_cost;
+    uint8_t class_id;
     float confidence;
     double timestamp;
 };
 
+/**
+ * @brief Manages temporal observations with a decay mechanism, maintaining a sum of confidences.
+ * Wraps a std::deque to store observations, allowing for efficient insertion and removal.
+ */
 class TemporalObservationQueue {
 private:
 
-    // std::deque<TileObservation> queue_;
+    std::deque<TileObservation> queue_;
     float confidence_sum_ = 0.0f;
     double decay_time_;
 
 public:
-std::deque<TileObservation> queue_;
     TemporalObservationQueue(){}
 
-    // Add an element with the current timestamp
+    /**
+     * @brief Adds an observation to the queue, resets the queue if class ID changes.
+     * @param tile_obs The observation to add.
+     */
     void push(TileObservation tile_obs) {
         if(tile_obs.class_id != getClassId())
         {
@@ -107,7 +143,9 @@ std::deque<TileObservation> queue_;
         queue_.push_back(tile_obs);
     }
 
-    // Remove the front element
+    /**
+     * @brief Removes the oldest observation from the queue.
+     */
     void pop() {
         if (!queue_.empty()) {
             confidence_sum_ -= queue_.front().confidence;
@@ -115,39 +153,63 @@ std::deque<TileObservation> queue_;
         }
     }
 
+    /**
+     * @brief Checks if the queue is empty.
+     * @return True if empty, false otherwise.
+     */
     bool empty() const {return queue_.empty();}
 
+    /**
+     * @brief Gets the size of the queue.
+     * @return The number of observations in the queue.
+     */
     int size() const { return queue_.size(); }
 
+    /**
+     * @brief Sets the decay time for observations.
+     * @param decay_time The decay time in seconds.
+     */
     void setDecayTime(float decay_time)
     {
         decay_time_ = decay_time;
     }
 
-    // Get the current sum of all elements
+    /**
+     * @brief Gets the current sum of confidence values of all observations.
+     * @return The sum of confidences.
+     */
     float getConfidenceSum() const {
         return confidence_sum_;
     }
 
+    /**
+     * @brief Gets the class ID of the most recent observation.
+     * @return The class ID, or 0 if queue is empty.
+     */
     uint8_t getClassId() const
     {
         if(!queue_.empty())
         {
             return queue_.back().class_id;
         }
-        return 255;
-    }
-
-    uint8_t getClassCost() const
-    {
-        if(!queue_.empty())
-        {
-            return queue_.back().class_cost;
-        }
         return 0;
     }
 
-    // Remove elements older than a specified duration (in seconds)
+    /**
+     * @brief Returns a copy of the deque object. Will have overhead
+     * due to the copy operation but avoids race conditions since
+     * the object in the class is not made editable by others
+     * @return The class cost, or 0 if queue is empty.
+     */
+    std::deque<TileObservation> getQueue()
+    {
+        return queue_;
+    } 
+
+    /**
+     * @brief Removes observations older than the decay time.
+     * @param current_time The current time for comparison.
+     */
     void purgeOld(double current_time) {
         while (!queue_.empty()) {
             double age = current_time - queue_.front().timestamp;
@@ -160,6 +222,10 @@ std::deque<TileObservation> queue_;
     }
 };
 
+/**
+ * @brief Manages a map of tile observations, allowing for spatial and temporal querying.
+ * Utilizes an unordered_map to efficiently index observations by tile and supports locking for thread safety.
+ */
 class SegmentationTileMap {
     private:
         std::unordered_map<TileIndex, TemporalObservationQueue> tile_map_;
@@ -189,20 +255,30 @@ class SegmentationTileMap {
         ConstIterator end() const { return tile_map_.end(); }
 
         /**
-        * @brief  Lock the segmentation buffer
-        */
+         * @brief Locks the map for exclusive access.
+         */
         inline void lock() { lock_.lock(); }
 
         /**
-         * @brief  Lock the segmentation buffer
+         * @brief Unlocks the map.
          */
         inline void unlock() { lock_.unlock(); }
 
+        /**
+         * @brief Returns the number of elements in the map.
+         * @return The size of the map.
+         */
         int size()
         {
             return tile_map_.size();
         }
 
+        /**
+         * @brief Converts world coordinates to a TileIndex.
+         * @param x X coordinate in world space.
+         * @param y Y coordinate in world space.
+         * @return The corresponding TileIndex.
+         */
         TileIndex worldToIndex(double x, double y) const {
             // Convert world coordinates to grid indices
             int ix = static_cast<int>(std::floor(x / resolution_));
@@ -210,6 +286,11 @@ class SegmentationTileMap {
             return TileIndex{ix, iy};
         }
 
+        /**
+         * @brief Converts a TileIndex to world coordinates.
+         * @param idx The index to convert.
+         * @return The world coordinates of the tile's center.
+         */
         TileWorldXY indexToWorld(TileIndex idx) const {
             // Calculate the world coordinates of the center of the grid cell
             double x = (static_cast<double>(idx.x) + 0.5) * resolution_;
@@ -217,6 +298,11 @@ class SegmentationTileMap {
             return TileWorldXY{x, y};
         }
 
+        /**
+         * @brief Adds an observation to the specified tile.
+         * @param obs The observation to add.
+         * @param idx The index of the tile.
+         */
         void pushObservation(TileObservation& obs, TileIndex& idx)
         {
             auto it = tile_map_.find(idx);
@@ -231,6 +317,10 @@ class SegmentationTileMap {
             }
         }
 
+        /**
+         * @brief Removes observations older than the decay time from all tiles.
+         * @param current_time The current time for comparison.
+         */
         void purgeOldObservations(double current_time)
         {
             std::vector<TileIndex> tiles_to_remove;
@@ -242,9 +332,7 @@ class SegmentationTileMap {
                     tiles_to_remove.emplace_back(tile.first);
                 }
             }
-            std::cout << "erasing " << tiles_to_remove.size() << " tiles\n";
             if(tile_map_.size() > 0)
-                std::cout << std::setprecision(15) << "first obs age " << tile_map_.begin()->second.size() << " and size is " << " t1 " <<  tile_map_.begin()->second.queue_.back().timestamp << " t2 " <<  tile_map_.begin()->second.queue_.back().timestamp << std::endl;
             for (auto& tile : tiles_to_remove)
             {
                 tile_map_.erase(tile);
@@ -258,7 +346,7 @@ struct PointData {
     uint8_t class_id;
 };
 
-sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(const SegmentationTileMap& tileMap) {
+sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(SegmentationTileMap& tileMap) {
     sensor_msgs::msg::PointCloud2 cloud;
     cloud.header.frame_id = "map";  // Set appropriate frame_id
     cloud.header.stamp = rclcpp::Clock().now();  // Set current time as timestamp
@@ -274,12 +362,11 @@ sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(const SegmentationTileMap
 
     // Reserve space for points
     std::vector<PointData> points;
-    for (const auto& tile : tileMap) {
+    for (auto& tile : tileMap) {
         TileIndex idx = tile.first;
         TileWorldXY worldXY = tileMap.indexToWorld(idx);
         double z = 0.0;
-
-        for (const auto& obs : tile.second.queue_) {
+        for (auto& obs : tile.second.getQueue()) {
             PointData point;
             point.x = worldXY.x;
             point.y = worldXY.y;
@@ -288,28 +375,9 @@ sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(const SegmentationTileMap
             point.confidence_sum = tile.second.getConfidenceSum() / tile.second.size();
             point.class_id = static_cast<uint8_t>(obs.class_id);
             points.push_back(point);
-            z += 0.02;  // Increment Z by 0.1m for each observation
+            z += 0.02;  // Increment Z by 0.02m for each observation
         }
     }
-    // for (const auto& tile : tileMap) {
-    //     TileIndex idx = tile.first;
-    //     TileWorldXY worldXY = tileMap.indexToWorld(idx);
-    //     double z = 0.0;
-    //     double z_limit = tile.second.getConfidenceSum() / 20000.0;
-
-    //     while(z < z_limit)
-    //     {
-    //         PointData point;
-    //         point.x = worldXY.x;
-    //         point.y = worldXY.y;
-    //         point.z = z;
-    //         point.confidence = tile.second.getConfidenceSum() / tile.second.size();
-    //         point.confidence_sum = tile.second.getConfidenceSum();
-    //         point.class_id = tile.second.getClassId();
-    //         points.push_back(point);
-    //         z += 0.02;  // Increment Z by 0.1m for each observation
-    //     }
-    // }
 
     // Set data in PointCloud2
     modifier.resize(points.size());  // Number of points
@@ -342,6 +410,7 @@ namespace nav2_costmap_2d {
 class SegmentationBuffer
 {
    public:
+    using SharedPtr = std::shared_ptr<SegmentationBuffer>;
     /**
      * @brief  Constructs an segmentation buffer
      * @param  topic_name The topic of the segmentations, used as an identifier for error and warning
@@ -369,10 +438,10 @@ class SegmentationBuffer
      */
     SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& parent, std::string buffer_source,
                        std::vector<std::string> class_types,
-                       std::unordered_map<std::string, uint8_t> class_names_cost_map, double observation_keep_time,
+                       std::unordered_map<std::string, CostHeuristicParams> class_names_cost_map, double observation_keep_time,
                        double expected_update_rate, double max_lookahead_distance, double min_lookahead_distance,
                        tf2_ros::Buffer& tf2_buffer, std::string global_frame, std::string sensor_frame,
-                       tf2::Duration tf_tolerance, double costmap_resolution);
+                       tf2::Duration tf_tolerance, double costmap_resolution, bool visualize_tile_map = false);
 
     /**
      * @brief  Destructor... cleans up
@@ -389,16 +458,10 @@ class SegmentationBuffer
                             const sensor_msgs::msg::Image& confidence);
 
     /**
-     * @brief  Pushes copies of all current segmentations onto the end of the vector passed in
-     * @param  segmentations The vector to be filled
-     */
-    void getSegmentations(std::vector<Segmentation>& segmentations);
-
-    /**
      * @brief  gets the class map associated with the segmentations stored in the buffer
      * @return the class map
      */
-    std::unordered_map<std::string, uint8_t> getClassMap();
+    std::unordered_map<std::string, CostHeuristicParams> getClassMap();
 
     void createClassIdCostMap(const vision_msgs::msg::LabelInfo& label_info);
 
@@ -435,16 +498,21 @@ class SegmentationBuffer
 
     void setMaxObstacleDistance(double distance) { sq_max_lookahead_distance_ = pow(distance, 2); }
 
-    void updateClassMap(std::string new_class, uint8_t new_cost);
+    void updateClassMap(std::string new_class, CostHeuristicParams new_cost);
 
     SegmentationTileMap::SharedPtr getSegmentationTileMap()
     {
         return temporal_tile_map_;
     }
 
-    uint8_t getCostForClassId(uint8_t class_id)
+    CostHeuristicParams getCostForClassId(uint8_t class_id)
     {
         return class_ids_cost_map_[class_id];
+    }
+
+    CostHeuristicParams getCostForClassName(std::string class_name)
+    {
+        return class_names_cost_map_[class_name];
     }
 
    private:
@@ -457,14 +525,13 @@ class SegmentationBuffer
     rclcpp::Logger logger_{rclcpp::get_logger("nav2_costmap_2d")};
     tf2_ros::Buffer& tf2_buffer_;
     std::vector<std::string> class_types_;
-    std::unordered_map<std::string, uint8_t> class_names_cost_map_;
-    std::unordered_map<uint16_t, uint8_t> class_ids_cost_map_;
+    std::unordered_map<std::string, CostHeuristicParams> class_names_cost_map_;
+    std::unordered_map<uint8_t, CostHeuristicParams> class_ids_cost_map_;
     const rclcpp::Duration observation_keep_time_;
     const rclcpp::Duration expected_update_rate_;
     rclcpp::Time last_updated_;
     std::string global_frame_;
     std::string sensor_frame_;
-    std::list<Segmentation> segmentation_list_;
     std::string buffer_source_;
     std::recursive_mutex lock_;  ///< @brief A lock for accessing data in callbacks safely
     double sq_max_lookahead_distance_;
@@ -473,8 +540,8 @@ class SegmentationBuffer
 
     SegmentationTileMap::SharedPtr temporal_tile_map_;
 
-
-    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr debug_pub_;
+    bool visualize_tile_map_;
+    rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr tile_map_pub_;
 };
 }  // namespace nav2_costmap_2d
 #endif  // NAV2_COSTMAP_2D__SEGMENTATION_BUFFER_HPP_

@@ -49,7 +49,6 @@
 #include "nav2_costmap_2d/costmap_layer.hpp"
 #include "nav2_costmap_2d/layer.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
-#include "nav2_costmap_2d/segmentation.hpp"
 #include "nav2_costmap_2d/segmentation_buffer.hpp"
 #include "nav2_util/node_utils.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -115,9 +114,7 @@ class SemanticSegmentationLayer : public CostmapLayer
      */
     virtual bool isClearable() { return true; }
 
-    bool getSegmentations(std::vector<nav2_costmap_2d::Segmentation>& segmentations) const;
-
-    bool getSegmentationTileMaps(std::vector<SegmentationTileMap::SharedPtr>& segmentation_tile_maps);
+    bool getSegmentationTileMaps(std::vector<std::pair<SegmentationTileMap::SharedPtr, SegmentationBuffer::SharedPtr>>& segmentation_tile_maps);
 
     rcl_interfaces::msg::SetParametersResult dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
 
