@@ -401,6 +401,81 @@ sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(SegmentationTileMap& tile
     return cloud;
 }
 
+/**
+ * Manages segmentation class information, including mapping between class names and IDs,
+ * as well as managing the cost heuristic parameters associated with each class.
+ */
+class SegmentationCostMultimap {
+public:
+    SegmentationCostMultimap(){}
+    /**
+     * Constructs the SegmentationCostMultimap.
+     * 
+     * @param nameToIdMap A map from class names to class IDs.
+     * @param nameToCostMap A map from class names to CostHeuristicParams.
+     */
+    SegmentationCostMultimap(const std::unordered_map<std::string, uint8_t>& nameToIdMap,
+                             const std::unordered_map<std::string, CostHeuristicParams>& nameToCostMap) {
+        for (const auto& pair : nameToIdMap) {
+            const auto& name = pair.first;
+            uint8_t id = pair.second;
+            CostHeuristicParams cost = nameToCostMap.at(name);
+            this->name_to_id_[name] = id;
+            this->id_to_cost_[id] = cost;
+        }
+    }
+
+    /**
+     * Updates the cost heuristic parameters associated with a class ID.
+     * 
+     * @param id The class ID.
+     * @param cost The new CostHeuristicParams to associate with the class.
+     */
+    void updateCostById(uint8_t id, const CostHeuristicParams& cost) {
+        id_to_cost_[id] = cost;
+    }
+
+    /**
+     * Retrieves the cost heuristic parameters associated with a class ID.
+     * 
+     * @param id The class ID.
+     * @return The CostHeuristicParams associated with the class.
+     */
+    CostHeuristicParams getCostById(uint8_t id) const {
+        return id_to_cost_.at(id);
+    }
+
+    /**
+     * Updates the cost heuristic parameters associated with a class name.
+     * 
+     * @param name The class name.
+     * @param cost The new CostHeuristicParams to associate with the class.
+     */
+    void updateCostByName(const std::string& name, const CostHeuristicParams& cost) {
+        uint8_t id = name_to_id_.at(name);
+        id_to_cost_[id] = cost;
+    }
+
+    /**
+     * Retrieves the cost heuristic parameters associated with a class name.
+     * 
+     * @param name The class name.
+     * @return The CostHeuristicParams associated with the class.
+     */
+    CostHeuristicParams getCostByName(const std::string& name) const {
+        uint8_t id = name_to_id_.at(name);
+        return id_to_cost_.at(id);
+    }
+
+    bool empty()
+    {
+        return name_to_id_.empty() || id_to_cost_.empty();
+    }
+
+private:
+    std::unordered_map<std::string, uint8_t> name_to_id_; // Maps class names to class IDs
+    std::unordered_map<uint8_t, CostHeuristicParams> id_to_cost_; // Maps class IDs to CostHeuristicParams
+};
 
 namespace nav2_costmap_2d {
 /**
@@ -441,7 +516,7 @@ class SegmentationBuffer
                        std::unordered_map<std::string, CostHeuristicParams> class_names_cost_map, double observation_keep_time,
                        double expected_update_rate, double max_lookahead_distance, double min_lookahead_distance,
                        tf2_ros::Buffer& tf2_buffer, std::string global_frame, std::string sensor_frame,
-                       tf2::Duration tf_tolerance, double costmap_resolution, bool visualize_tile_map = false);
+                       tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map = false);
 
     /**
      * @brief  Destructor... cleans up
@@ -463,9 +538,9 @@ class SegmentationBuffer
      */
     std::unordered_map<std::string, CostHeuristicParams> getClassMap();
 
-    void createClassIdCostMap(const vision_msgs::msg::LabelInfo& label_info);
+    void createSegmentationCostMultimap(const vision_msgs::msg::LabelInfo& label_info);
 
-    bool isClassIdCostMapEmpty() { return class_ids_cost_map_.empty(); }
+    bool isClassIdCostMapEmpty() { return segmentation_cost_multimap_.empty(); }
 
     /**
      * @brief  Check if the segmentation buffer is being update at its expected rate
@@ -507,12 +582,12 @@ class SegmentationBuffer
 
     CostHeuristicParams getCostForClassId(uint8_t class_id)
     {
-        return class_ids_cost_map_[class_id];
+        return segmentation_cost_multimap_.getCostById(class_id);
     }
 
     CostHeuristicParams getCostForClassName(std::string class_name)
     {
-        return class_names_cost_map_[class_name];
+        return segmentation_cost_multimap_.getCostByName(class_name);
     }
 
    private:
@@ -526,7 +601,6 @@ class SegmentationBuffer
     tf2_ros::Buffer& tf2_buffer_;
     std::vector<std::string> class_types_;
     std::unordered_map<std::string, CostHeuristicParams> class_names_cost_map_;
-    std::unordered_map<uint8_t, CostHeuristicParams> class_ids_cost_map_;
     const rclcpp::Duration observation_keep_time_;
     const rclcpp::Duration expected_update_rate_;
     rclcpp::Time last_updated_;
@@ -537,6 +611,8 @@ class SegmentationBuffer
     double sq_max_lookahead_distance_;
     double sq_min_lookahead_distance_;
     tf2::Duration tf_tolerance_;
+    
+    SegmentationCostMultimap segmentation_cost_multimap_;
 
     SegmentationTileMap::SharedPtr temporal_tile_map_;
 

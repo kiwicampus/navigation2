@@ -53,7 +53,7 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
                                        double expected_update_rate, double max_lookahead_distance,
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
-                                       tf2::Duration tf_tolerance, double costmap_resolution, bool visualize_tile_map)
+                                       tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map)
   : tf2_buffer_(tf2_buffer)
   , class_types_(class_types)
   , class_names_cost_map_(class_names_cost_map)
@@ -70,7 +70,7 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   clock_ = node->get_clock();
   logger_ = node->get_logger();
   last_updated_ = node->now();
-  temporal_tile_map_ = std::make_shared<SegmentationTileMap>(costmap_resolution, 5.0);
+  temporal_tile_map_ = std::make_shared<SegmentationTileMap>(costmap_resolution, tile_map_decay_time);
   visualize_tile_map_ = visualize_tile_map;
   if(visualize_tile_map_)
   {
@@ -80,12 +80,14 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
 
 SegmentationBuffer::~SegmentationBuffer() {}
 
-void SegmentationBuffer::createClassIdCostMap(const vision_msgs::msg::LabelInfo& label_info)
+void SegmentationBuffer::createSegmentationCostMultimap(const vision_msgs::msg::LabelInfo& label_info)
 {
+  std::unordered_map<std::string, uint8_t> class_to_id_map;
   for (const auto& semantic_class : label_info.class_map)
     {
-      class_ids_cost_map_[semantic_class.class_id] = class_names_cost_map_[semantic_class.class_name];
+      class_to_id_map[semantic_class.class_name] = semantic_class.class_id;
     }
+    segmentation_cost_multimap_ = SegmentationCostMultimap(class_to_id_map, class_names_cost_map_);
 }
 
 void SegmentationBuffer::bufferSegmentation(
@@ -210,7 +212,7 @@ std::unordered_map<std::string, CostHeuristicParams> SegmentationBuffer::getClas
 
 void SegmentationBuffer::updateClassMap(std::string new_class, CostHeuristicParams new_cost)
 {
-  class_names_cost_map_[new_class] = new_cost;
+  segmentation_cost_multimap_.updateCostByName(new_class, new_cost);
 }
 
 bool SegmentationBuffer::isCurrent() const

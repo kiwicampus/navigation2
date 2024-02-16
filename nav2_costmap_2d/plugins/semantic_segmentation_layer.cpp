@@ -69,7 +69,7 @@ void SemanticSegmentationLayer::onInitialize()
   std::string segmentation_topic, confidence_topic, pointcloud_topic, labels_topic, sensor_frame;
   std::vector<std::string> class_types_string;
   double max_obstacle_distance, min_obstacle_distance, observation_keep_time, transform_tolerance,
-    expected_update_rate;
+    expected_update_rate, tile_map_decay_time;
   bool track_unknown_space, visualize_tile_map;
 
   declareParameter("enabled", rclcpp::ParameterValue(true));
@@ -111,6 +111,7 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "class_types", rclcpp::ParameterValue(std::vector<std::string>({})));
     declareParameter(source + "." + "max_obstacle_distance", rclcpp::ParameterValue(5.0));
     declareParameter(source + "." + "min_obstacle_distance", rclcpp::ParameterValue(0.3));
+    declareParameter(source + "." + "tile_map_decay_time", rclcpp::ParameterValue(5.0));
     declareParameter(source + "." + "visualize_tile_map", rclcpp::ParameterValue(false));
     
     node->get_parameter(name_ + "." + source + "." + "segmentation_topic", segmentation_topic);
@@ -123,6 +124,7 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + source + "." + "class_types", class_types_string);
     node->get_parameter(name_ + "." + source + "." + "max_obstacle_distance", max_obstacle_distance);
     node->get_parameter(name_ + "." + source + "." + "min_obstacle_distance", min_obstacle_distance);
+    node->get_parameter(name_ + "." + source + "." + "tile_map_decay_time", tile_map_decay_time);
     node->get_parameter(name_ + "." + source + "." + "visualize_tile_map", visualize_tile_map);
     if (class_types_string.empty())
     {
@@ -182,7 +184,7 @@ void SemanticSegmentationLayer::onInitialize()
     auto segmentation_buffer = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
       node, source, class_types_string, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
       min_obstacle_distance, *tf_, global_frame_, sensor_frame,
-      tf2::durationFromSec(transform_tolerance), getResolution(), visualize_tile_map);
+      tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map);
 
     segmentation_buffers_.push_back(segmentation_buffer);
     
@@ -338,7 +340,7 @@ void SemanticSegmentationLayer::labelinfoCb(
     const std::shared_ptr<const vision_msgs::msg::LabelInfo>& label_info,
     const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer> & buffer)
     {
-      buffer->createClassIdCostMap(*label_info);
+      buffer->createSegmentationCostMultimap(*label_info);
     }
 
 void SemanticSegmentationLayer::syncSegmPointcloudCb(
