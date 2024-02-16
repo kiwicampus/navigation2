@@ -76,11 +76,18 @@ void SemanticSegmentationLayer::onInitialize()
   declareParameter("combination_method", rclcpp::ParameterValue(1));
   declareParameter("observation_sources", rclcpp::ParameterValue(std::string("")));
   declareParameter("publish_debug_topics", rclcpp::ParameterValue(false));
+  declareParameter("nonpersistent", rclcpp::ParameterValue(false));
 
   node->get_parameter(name_ + "." + "enabled", enabled_);
   node->get_parameter(name_ + "." + "combination_method", combination_method_);
   node->get_parameter("track_unknown_space", track_unknown_space);
-  node->get_parameter("transform_tolerance", transform_tolerance);  
+  node->get_parameter("transform_tolerance", transform_tolerance); 
+  node->get_parameter(name_ + "." + "nonpersistent", nonpersistent_);  
+
+  if(nonpersistent_)
+  {
+    combination_method_ = 0;
+  }
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
   rolling_window_ = layered_costmap_->isRolling();
@@ -241,6 +248,16 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
   std::vector<nav2_costmap_2d::Segmentation> segmentations;
   getSegmentations(segmentations);
 
+  if(nonpersistent_)
+  {
+    // clear costmap each segmentation
+    resetMaps();
+    // tell the costmap to update a square 20x20 around the robot
+    touch(robot_x+10.0,robot_y+10.0, min_x, min_y, max_x, max_y);
+    touch(robot_x+10.0,robot_y-10.0, min_x, min_y, max_x, max_y);
+    touch(robot_x-10.0,robot_y-10.0, min_x, min_y, max_x, max_y);
+    touch(robot_x-10.0,robot_y+10.0, min_x, min_y, max_x, max_y);
+  }
 
   current_ = true;
 
