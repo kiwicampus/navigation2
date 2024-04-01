@@ -89,6 +89,8 @@ void PathAlignCritic::score(CriticData & data)
 
   // Finish populating the path vector
   auto & final_pose = path[path_segments_count - 1];
+  final_pose.x = data.path.x(path_segments_count - 1);
+  final_pose.y = data.path.y(path_segments_count - 1);
   final_pose.theta = data.path.yaws(path_segments_count - 1);
 
   float summed_path_dist = 0.0f, dyaw = 0.0f;
