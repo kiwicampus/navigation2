@@ -20,7 +20,7 @@
 #include <vector>
 #include <utility>
 
-#include "nav2_amcl/angleutils.hpp"
+#include "angles/angles.h"
 #include "nav2_regulated_pure_pursuit_controller/regulated_pure_pursuit_controller.hpp"
 #include "nav2_core/controller_exceptions.hpp"
 #include "nav2_util/node_utils.hpp"
@@ -238,6 +238,23 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
       collision_checker_->costAtPose(pose.pose.position.x, pose.pose.position.y), transformed_plan,
       linear_vel, x_vel_sign);
 
+    if (cancelling_) {
+      const double & dt = control_duration_;
+      linear_vel = speed.linear.x - x_vel_sign * dt * params_->cancel_deceleration;
+
+      if (x_vel_sign > 0) {
+        if (linear_vel <= 0) {
+          linear_vel = 0;
+          finished_cancelling_ = true;
+        }
+      } else {
+        if (linear_vel >= 0) {
+          linear_vel = 0;
+          finished_cancelling_ = true;
+        }
+      }
+    }
+
     // Apply curvature to angular velocity after constraining linear velocity
     angular_vel = linear_vel * regulation_curvature;
   }
@@ -258,6 +275,12 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
   return cmd_vel;
 }
 
+bool RegulatedPurePursuitController::cancel()
+{
+  cancelling_ = true;
+  return finished_cancelling_;
+}
+
 bool RegulatedPurePursuitController::shouldRotateToPath(
   const geometry_msgs::msg::PoseStamped & carrot_pose, double & angle_to_path,
   double & x_vel_sign)
@@ -266,7 +289,7 @@ bool RegulatedPurePursuitController::shouldRotateToPath(
   angle_to_path = atan2(carrot_pose.pose.position.y, carrot_pose.pose.position.x);
   // In case we are reversing
   if (x_vel_sign < 0.0) {
-    angle_to_path = nav2_amcl::angleutils::normalize(angle_to_path + M_PI);
+    angle_to_path = angles::normalize_angle(angle_to_path + M_PI);
   }
   return params_->use_rotate_to_heading &&
          fabs(angle_to_path) > params_->rotate_to_heading_min_angle;
@@ -443,6 +466,12 @@ void RegulatedPurePursuitController::setSpeedLimit(
       params_->desired_linear_vel = speed_limit;
     }
   }
+}
+
+void RegulatedPurePursuitController::reset()
+{
+  cancelling_ = false;
+  finished_cancelling_ = false;
 }
 
 double RegulatedPurePursuitController::findVelocitySignChange(
