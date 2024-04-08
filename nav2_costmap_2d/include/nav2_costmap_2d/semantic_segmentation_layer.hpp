@@ -54,9 +54,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "tf2_ros/message_filter.h"
-#include "vision_msgs/msg/label_info.hpp"
-
-// Define your custom struct.
+#include "vision_msgs/msg/label_info.hzpp"
 
 namespace nav2_costmap_2d {
 /**
@@ -124,9 +122,9 @@ class SemanticSegmentationLayer : public CostmapLayer
                               const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer);
 
     void syncSegmConfPointcloudCb(const std::shared_ptr<const sensor_msgs::msg::Image>& segmentation,
-                              const std::shared_ptr<const sensor_msgs::msg::Image>& confidence,
-                              const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
-                              const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer);
+                                  const std::shared_ptr<const sensor_msgs::msg::Image>& confidence,
+                                  const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
+                                  const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer);
 
     void labelinfoCb(const std::shared_ptr<const vision_msgs::msg::LabelInfo>& label_info,
                      const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer);

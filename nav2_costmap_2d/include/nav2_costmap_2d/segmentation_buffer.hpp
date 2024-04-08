@@ -60,15 +60,6 @@ struct CostHeuristicParams
 };
 
 /**
- * @brief Represents the parameters associated with the cost calculation for a given class
- */
-struct ClassToCostManager
-{
- uint8_t base_cost, max_cost, mark_confidence;
- int samples_to_max_cost;
-};
-
-/**
  * @brief Represents a 2D grid index with equality comparison. Supports negative indexes
  */
 struct TileIndex {
@@ -346,6 +337,14 @@ struct PointData {
     uint8_t class_id;
 };
 
+/**
+ * @brief Creates a PointCloud2 message that contains a visual representation of 
+ * a temporal tile map. There's a "column" of points on each tile, each point represents
+ * a segmentation observation over that tile and they are all stacked together. Each observation
+ * Has a channel for the class, for the confidence, and the confidence sum of the observations
+ * over that tile
+ * @param tileMap The segmentation tile map
+ */
 sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(SegmentationTileMap& tileMap) {
     sensor_msgs::msg::PointCloud2 cloud;
     cloud.header.frame_id = "map";  // Set appropriate frame_id
