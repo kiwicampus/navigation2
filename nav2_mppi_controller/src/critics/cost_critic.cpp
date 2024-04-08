@@ -14,22 +14,24 @@
 // limitations under the License.
 
 #include <cmath>
-#include "nav2_mppi_controller/critics/obstacles_critic.hpp"
-#include "nav2_costmap_2d/inflation_layer.hpp"
+#include "nav2_mppi_controller/critics/cost_critic.hpp"
+
 namespace mppi::critics
 {
 
-void ObstaclesCritic::initialize()
+void CostCritic::initialize()
 {
   auto getParam = parameters_handler_->getParamGetter(name_);
   getParam(consider_footprint_, "consider_footprint", false);
   getParam(power_, "cost_power", 1);
-  getParam(repulsion_weight_, "repulsion_weight", 1.5);
-  getParam(critical_weight_, "critical_weight", 20.0);
-  getParam(collision_cost_, "collision_cost", 100000.0);
-  getParam(collision_margin_distance_, "collision_margin_distance", 0.10);
+  getParam(weight_, "cost_weight", 3.81);
+  getParam(critical_cost_, "critical_cost", 300.0);
+  getParam(collision_cost_, "collision_cost", 1000000.0);
   getParam(near_goal_distance_, "near_goal_distance", 0.5);
   getParam(inflation_layer_name_, "inflation_layer_name", std::string(""));
+
+  // Normalized by cost value to put in same regime as other weights
+  weight_ /= 254.0f;
 
   collision_checker_.setCostmap(costmap_);
   possible_collision_cost_ = findCircumscribedCost(costmap_ros_);
@@ -46,13 +48,13 @@ void ObstaclesCritic::initialize()
 
   RCLCPP_INFO(
     logger_,
-    "ObstaclesCritic instantiated with %d power and %f / %f weights. "
+    "InflationCostCritic instantiated with %d power and %f / %f weights. "
     "Critic will collision check based on %s cost.",
-    power_, critical_weight_, repulsion_weight_, consider_footprint_ ?
+    power_, critical_cost_, weight_, consider_footprint_ ?
     "footprint" : "circular");
 }
 
-float ObstaclesCritic::findCircumscribedCost(
+float CostCritic::findCircumscribedCost(
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap)
 {
   double result = -1.0;
@@ -69,8 +71,6 @@ float ObstaclesCritic::findCircumscribedCost(
   if (inflation_layer != nullptr) {
     const double resolution = costmap->getCostmap()->getResolution();
     result = inflation_layer->computeCost(circum_radius / resolution);
-    inflation_scale_factor_ = static_cast<float>(inflation_layer->getCostScalingFactor());
-    inflation_radius_ = static_cast<float>(inflation_layer->getInflationRadius());
   } else {
     RCLCPP_WARN(
       logger_,
@@ -87,22 +87,7 @@ float ObstaclesCritic::findCircumscribedCost(
   return circumscribed_cost_;
 }
 
-float ObstaclesCritic::distanceToObstacle(const CollisionCost & cost)
-{
-  const float scale_factor = inflation_scale_factor_;
-  const float min_radius = costmap_ros_->getLayeredCostmap()->getInscribedRadius();
-  float dist_to_obj = (scale_factor * min_radius - log(cost.cost) + log(253.0f)) / scale_factor;
-
-  // If not footprint collision checking, the cost is using the center point cost and
-  // needs the radius subtracted to obtain the closest distance to the object
-  if (!cost.using_footprint) {
-    dist_to_obj -= min_radius;
-  }
-
-  return dist_to_obj;
-}
-
-void ObstaclesCritic::score(CriticData & data)
+void CostCritic::score(CriticData & data)
 {
   using xt::evaluation_strategy::immediate;
   if (!enabled_) {
@@ -120,59 +105,47 @@ void ObstaclesCritic::score(CriticData & data)
     near_goal = true;
   }
 
-  auto && raw_cost = xt::xtensor<float, 1>::from_shape({data.costs.shape(0)});
-  raw_cost.fill(0.0f);
   auto && repulsive_cost = xt::xtensor<float, 1>::from_shape({data.costs.shape(0)});
-  repulsive_cost.fill(0.0f);
+  repulsive_cost.fill(0.0);
 
   const size_t traj_len = data.trajectories.x.shape(1);
   bool all_trajectories_collide = true;
   for (size_t i = 0; i < data.trajectories.x.shape(0); ++i) {
     bool trajectory_collide = false;
-    float traj_cost = 0.0f;
     const auto & traj = data.trajectories;
-    CollisionCost pose_cost;
+    float pose_cost;
 
     for (size_t j = 0; j < traj_len; j++) {
-      pose_cost = costAtPose(traj.x(i, j), traj.y(i, j), traj.yaws(i, j));
-      if (pose_cost.cost < 1.0f) {continue;}  // In free space
+      // The costAtPose doesn't use orientation
+      // The footprintCostAtPose will always return "INSCRIBED" if footprint is over it
+      // So the center point has more information than the footprint
+      pose_cost = costAtPose(traj.x(i, j), traj.y(i, j));
+      if (pose_cost < 1.0f) {continue;}  // In free space
 
-      if (inCollision(pose_cost.cost)) {
+      if (inCollision(pose_cost, traj.x(i, j), traj.y(i, j), traj.yaws(i, j))) {
         trajectory_collide = true;
         break;
       }
 
-      // Cannot process repulsion if inflation layer does not exist
-      if (inflation_radius_ == 0.0f || inflation_scale_factor_ == 0.0f) {
-        continue;
-      }
-
-      const float dist_to_obj = distanceToObstacle(pose_cost);
-
       // Let near-collision trajectory points be punished severely
-      if (dist_to_obj < collision_margin_distance_) {
-        traj_cost += (collision_margin_distance_ - dist_to_obj);
-      }
-
-      // Generally prefer trajectories further from obstacles
-      if (!near_goal) {
-        repulsive_cost[i] += inflation_radius_ - dist_to_obj;
+      // Note that we collision check based on the footprint actual,
+      // but score based on the center-point cost regardless
+      using namespace nav2_costmap_2d; // NOLINT
+      if (pose_cost >= INSCRIBED_INFLATED_OBSTACLE) {
+        repulsive_cost[i] += critical_cost_;
+      } else if (!near_goal) {  // Generally prefer trajectories further from obstacles
+        repulsive_cost[i] += pose_cost;
       }
     }
 
-    if (!trajectory_collide) {all_trajectories_collide = false;}
-    raw_cost[i] = trajectory_collide ? collision_cost_ : traj_cost;
+    if (!trajectory_collide) {
+      all_trajectories_collide = false;
+    } else {
+      repulsive_cost[i] = collision_cost_;
+    }
   }
 
-  // Normalize repulsive cost by trajectory length & lowest score to not overweight importance
-  // This is a preferential cost, not collision cost, to be tuned relative to desired behaviors
-  auto && repulsive_cost_normalized =
-    (repulsive_cost - xt::amin(repulsive_cost, immediate)) / traj_len;
-
-  data.costs += xt::pow(
-    (critical_weight_ * raw_cost) +
-    (repulsion_weight_ * repulsive_cost_normalized),
-    power_);
+  data.costs += xt::pow((weight_ * repulsive_cost / traj_len), power_);
   data.fail_flag = all_trajectories_collide;
 }
 
@@ -181,10 +154,18 @@ void ObstaclesCritic::score(CriticData & data)
   * @param cost Costmap cost
   * @return bool if in collision
   */
-bool ObstaclesCritic::inCollision(float cost) const
+bool CostCritic::inCollision(float cost, float x, float y, float theta)
 {
   bool is_tracking_unknown =
     costmap_ros_->getLayeredCostmap()->isTrackingUnknown();
+
+  // If consider_footprint_ check footprint scort for collision
+  if (consider_footprint_ &&
+    (cost >= possible_collision_cost_ || possible_collision_cost_ < 1.0f))
+  {
+    cost = static_cast<float>(collision_checker_.footprintCostAtPose(
+        x, y, theta, costmap_ros_->getRobotFootprint()));
+  }
 
   switch (static_cast<unsigned char>(cost)) {
     using namespace nav2_costmap_2d; // NOLINT
@@ -199,27 +180,15 @@ bool ObstaclesCritic::inCollision(float cost) const
   return false;
 }
 
-CollisionCost ObstaclesCritic::costAtPose(float x, float y, float theta)
+float CostCritic::costAtPose(float x, float y)
 {
-  CollisionCost collision_cost;
-  float & cost = collision_cost.cost;
-  collision_cost.using_footprint = false;
+  using namespace nav2_costmap_2d;   // NOLINT
   unsigned int x_i, y_i;
   if (!collision_checker_.worldToMap(x, y, x_i, y_i)) {
-    cost = nav2_costmap_2d::NO_INFORMATION;
-    return collision_cost;
-  }
-  cost = collision_checker_.pointCost(x_i, y_i);
-
-  if (consider_footprint_ &&
-    (cost >= possible_collision_cost_ || possible_collision_cost_ < 1.0f))
-  {
-    cost = static_cast<float>(collision_checker_.footprintCostAtPose(
-        x, y, theta, costmap_ros_->getRobotFootprint()));
-    collision_cost.using_footprint = true;
+    return nav2_costmap_2d::NO_INFORMATION;
   }
 
-  return collision_cost;
+  return collision_checker_.pointCost(x_i, y_i);
 }
 
 }  // namespace mppi::critics
@@ -227,5 +196,5 @@ CollisionCost ObstaclesCritic::costAtPose(float x, float y, float theta)
 #include <pluginlib/class_list_macros.hpp>
 
 PLUGINLIB_EXPORT_CLASS(
-  mppi::critics::ObstaclesCritic,
+  mppi::critics::CostCritic,
   mppi::critics::CriticFunction)

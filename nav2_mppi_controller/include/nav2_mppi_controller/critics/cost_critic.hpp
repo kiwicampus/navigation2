@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Samsung Research America, @artofnothingness Alexey Budyakov
+// Copyright (c) 2023 Robocc Brice Renaudeau
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#ifndef NAV2_MPPI_CONTROLLER__CRITICS__OBSTACLES_CRITIC_HPP_
-#define NAV2_MPPI_CONTROLLER__CRITICS__OBSTACLES_CRITIC_HPP_
+#ifndef NAV2_MPPI_CONTROLLER__CRITICS__COST_CRITIC_HPP_
+#define NAV2_MPPI_CONTROLLER__CRITICS__COST_CRITIC_HPP_
 
 #include <memory>
 #include <string>
 
 #include "nav2_costmap_2d/footprint_collision_checker.hpp"
 #include "nav2_costmap_2d/inflation_layer.hpp"
+
 #include "nav2_mppi_controller/critic_function.hpp"
 #include "nav2_mppi_controller/models/state.hpp"
 #include "nav2_mppi_controller/tools/utils.hpp"
@@ -28,13 +29,10 @@ namespace mppi::critics
 {
 
 /**
- * @class mppi::critics::ConstraintCritic
- * @brief Critic objective function for avoiding obstacles, allowing it to deviate off
- * the planned path. This is important to tune in tandem with PathAlign to make a balance
- * between path-tracking and dynamic obstacle avoidance capabilities as desirable for a
- * particular application
+ * @class mppi::critics::CostCritic
+ * @brief Critic objective function for avoiding obstacles using costmap's inflated cost
  */
-class ObstaclesCritic : public CriticFunction
+class CostCritic : public CriticFunction
 {
 public:
   /**
@@ -52,26 +50,21 @@ public:
 protected:
   /**
     * @brief Checks if cost represents a collision
-    * @param cost Costmap cost
+    * @param cost Point cost at pose center
+    * @param x X of pose
+    * @param y Y of pose
+    * @param theta theta of pose
     * @return bool if in collision
     */
-  inline bool inCollision(float cost) const;
+  bool inCollision(float cost, float x, float y, float theta);
 
   /**
     * @brief cost at a robot pose
     * @param x X of pose
     * @param y Y of pose
-    * @param theta theta of pose
     * @return Collision information at pose
     */
-  inline CollisionCost costAtPose(float x, float y, float theta);
-
-  /**
-    * @brief Distance to obstacle from cost
-    * @param cost Costmap cost
-    * @return float Distance to the obstacle represented by cost
-    */
-  inline float distanceToObstacle(const CollisionCost & cost);
+  float costAtPose(float x, float y);
 
   /**
     * @brief Find the min cost of the inflation decay function for which the robot MAY be
@@ -85,21 +78,21 @@ protected:
 protected:
   nav2_costmap_2d::FootprintCollisionChecker<nav2_costmap_2d::Costmap2D *>
   collision_checker_{nullptr};
+  float possible_collision_cost_;
 
   bool consider_footprint_{true};
+  float circumscribed_radius_{0};
+  float circumscribed_cost_{0};
   float collision_cost_{0};
-  float inflation_scale_factor_{0}, inflation_radius_{0};
+  float critical_cost_{0};
+  float weight_{0};
 
-  float possible_collision_cost_;
-  float collision_margin_distance_;
   float near_goal_distance_;
-  float circumscribed_cost_{0}, circumscribed_radius_{0};
+  std::string inflation_layer_name_;
 
   unsigned int power_{0};
-  float repulsion_weight_, critical_weight_{0};
-  std::string inflation_layer_name_;
 };
 
 }  // namespace mppi::critics
 
-#endif  // NAV2_MPPI_CONTROLLER__CRITICS__OBSTACLES_CRITIC_HPP_
+#endif  // NAV2_MPPI_CONTROLLER__CRITICS__COST_CRITIC_HPP_
