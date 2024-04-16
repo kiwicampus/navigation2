@@ -233,6 +233,7 @@ class SegmentationTileMap {
         using ConstIterator = typename std::unordered_map<TileIndex, TemporalObservationQueue>::const_iterator;
 
         SegmentationTileMap(float resolution, float decay_time) : resolution_(resolution), decay_time_(decay_time) {
+            // 10k observations seemed to be a good estimate of the amount of data to be held for a decay time of ~5s
             tile_map_.reserve(1e4);
         }
         SegmentationTileMap(){}
@@ -282,11 +283,11 @@ class SegmentationTileMap {
          * @param idx The index to convert.
          * @return The world coordinates of the tile's center.
          */
-        TileWorldXY indexToWorld(TileIndex idx) const {
+        TileWorldXY indexToWorld(int x, int y) const {
             // Calculate the world coordinates of the center of the grid cell
-            double x = (static_cast<double>(idx.x) + 0.5) * resolution_;
-            double y = (static_cast<double>(idx.y) + 0.5) * resolution_;
-            return TileWorldXY{x, y};
+            double x_world = (static_cast<double>(x) + 0.5) * resolution_;
+            double y_world = (static_cast<double>(y) + 0.5) * resolution_;
+            return TileWorldXY{x_world, y_world};
         }
 
         /**
@@ -331,6 +332,11 @@ class SegmentationTileMap {
         }
 };
 
+/**
+ * @brief Struct for holding the relevant data of any observation. Includes
+ * its position, its confidence, the confidence sum of the tile and the
+ * class to which it belongs
+ */
 struct PointData {
     float x, y, z;
     float confidence, confidence_sum;
@@ -363,7 +369,7 @@ sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(SegmentationTileMap& tile
     std::vector<PointData> points;
     for (auto& tile : tileMap) {
         TileIndex idx = tile.first;
-        TileWorldXY worldXY = tileMap.indexToWorld(idx);
+        TileWorldXY worldXY = tileMap.indexToWorld(idx.x, idx.y);
         double z = 0.0;
         for (auto& obs : tile.second.getQueue()) {
             PointData point;
@@ -415,12 +421,12 @@ public:
      */
     SegmentationCostMultimap(const std::unordered_map<std::string, uint8_t>& nameToIdMap,
                              const std::unordered_map<std::string, CostHeuristicParams>& nameToCostMap) {
+        name_to_id_ = nameToIdMap;
         for (const auto& pair : nameToIdMap) {
             const auto& name = pair.first;
             uint8_t id = pair.second;
             CostHeuristicParams cost = nameToCostMap.at(name);
-            this->name_to_id_[name] = id;
-            this->id_to_cost_[id] = cost;
+            id_to_cost_[id] = cost;
         }
     }
 

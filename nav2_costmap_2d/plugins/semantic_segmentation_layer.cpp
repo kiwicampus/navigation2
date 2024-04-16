@@ -267,7 +267,9 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
   {
     for(auto& tile: *tile_map.first)
     {
-      TileWorldXY tile_world_coords = tile_map.first->indexToWorld(tile.first);
+      TileWorldXY tile_world_coords = tile_map.first->indexToWorld(tile.first.x, tile.first.y);
+      // alias tile.second with a name for more readability
+      TemporalObservationQueue& obs_queue = tile.second;
       unsigned int mx, my;
       if (!worldToMap(tile_world_coords.x, tile_world_coords.y, mx, my))
       {
@@ -275,8 +277,8 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
         continue;
       }
       unsigned int index = getIndex(mx, my);
-      CostHeuristicParams cost_params = tile_map.second->getCostForClassId(tile.second.getClassId());
-      if(tile.second.size() >= cost_params.samples_to_max_cost && tile.second.getConfidenceSum() / tile.second.size() > cost_params.mark_confidence)
+      CostHeuristicParams cost_params = tile_map.second->getCostForClassId(obs_queue.getClassId());
+      if(obs_queue.size() >= cost_params.samples_to_max_cost && obs_queue.getConfidenceSum() / obs_queue.size() > cost_params.mark_confidence)
       {
         costmap_[index] = cost_params.max_cost;
       }
@@ -410,8 +412,6 @@ void SemanticSegmentationLayer::syncSegmConfPointcloudCb(const std::shared_ptr<c
       return;
     }
     buffer->lock();
-    // we are passing the segmentation as confidence temporarily while we figure out a good use for getting
-    // confidence maps
     buffer->bufferSegmentation(*pointcloud, *segmentation, *confidence);
     buffer->unlock();
 }

@@ -54,7 +54,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "tf2_ros/message_filter.h"
-#include "vision_msgs/msg/label_info.hzpp"
+#include "vision_msgs/msg/label_info.hpp"
 
 namespace nav2_costmap_2d {
 /**
@@ -112,6 +112,12 @@ class SemanticSegmentationLayer : public CostmapLayer
      */
     virtual bool isClearable() { return true; }
 
+    /**
+     * @brief Get the buffers and the tile maps the plugin stores. one for each source. Takes a vector of tile maps
+     * as reference and fills it inside the function
+     * @param segmentation_tile_maps the vector of tile maps to be filled by the function
+     * @return whether the tile maps could be retrieved and filled successfully
+     */
     bool getSegmentationTileMaps(std::vector<std::pair<SegmentationTileMap::SharedPtr, SegmentationBuffer::SharedPtr>>& segmentation_tile_maps);
 
     rcl_interfaces::msg::SetParametersResult dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
