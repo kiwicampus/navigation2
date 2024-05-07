@@ -49,6 +49,9 @@
 #include "builtin_interfaces/msg/time.hpp"
 #include "nav2_mppi_controller/critic_data.hpp"
 
+#define M_PIF 3.141592653589793238462643383279502884e+00F
+#define M_PIF_2 1.5707963267948966e+00F
+
 namespace mppi::utils
 {
 using xt::evaluation_strategy::immediate;
@@ -707,6 +710,12 @@ inline size_t findClosestPathPt(const std::vector<float> & vec, float dist, size
   }
   return iter - vec.begin();
 }
+
+// A struct to hold pose data in floating point resolution
+struct Pose2D
+{
+  float x, y, theta;
+};
 
 }  // namespace mppi::utils
 
