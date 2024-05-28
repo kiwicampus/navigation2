@@ -77,6 +77,11 @@ DenoiseLayer::onInitialize()
     }
   }
 
+  dyn_params_handler_ = node->add_on_set_parameters_callback(
+    std::bind(
+      &DenoiseLayer::dynamicParametersCallback,
+      this, std::placeholders::_1));
+
   current_ = true;
 }
 
@@ -201,6 +206,57 @@ bool DenoiseLayer::isBackground(uint8_t pixel) const
     pixel == INSCRIBED_INFLATED_OBSTACLE ||
     (pixel == NO_INFORMATION && no_information_is_obstacle_);
   return !is_obstacle;
+}
+
+/**
+  * @brief Callback executed when a parameter change is detected
+  * @param event ParameterEvent message
+  */
+rcl_interfaces::msg::SetParametersResult
+DenoiseLayer::dynamicParametersCallback(
+  std::vector<rclcpp::Parameter> parameters)
+{
+  rcl_interfaces::msg::SetParametersResult result;
+
+  for (auto parameter : parameters) {
+    const auto & param_type = parameter.get_type();
+    const auto & param_name = parameter.get_name();
+
+    if (param_type == rclcpp::ParameterType::PARAMETER_INTEGER) {
+      if (param_name == name_ + "." + "minimal_group_size")
+      {
+        RCLCPP_WARN(
+          logger_,
+          "DenoiseLayer::dynamicParametersCallback(): param minimal_group_size: %li."
+          " A value of 1 or less means that all map cells will be left as they are.",
+          parameter.as_int());
+        minimal_group_size_ = static_cast<size_t>(parameter.as_int());
+      } else if (param_name == name_ + "." + "group_connectivity_type")
+      {
+        if (parameter.as_int() == 4) {
+          group_connectivity_type_ = ConnectivityType::Way4;
+        } else if (parameter.as_int() == 8){
+          group_connectivity_type_ = ConnectivityType::Way8;
+        }
+        else{
+          RCLCPP_WARN(
+            logger_, "DenoiseLayer::dynamicParametersCallback(): param group_connectivity_type: %li."
+            " Possible values are  4 (neighbors pixels are connected horizontally and vertically) "
+            "or 8 (neighbors pixels are connected horizontally, vertically and diagonally)."
+            "The default value 8 will be used",
+            parameter.as_int());
+          group_connectivity_type_ = ConnectivityType::Way8;
+        }
+      }
+    } else if (param_type == rclcpp::ParameterType::PARAMETER_BOOL) {
+      if (param_name == name_ + "." + "enabled" && enabled_ != parameter.as_bool()) {
+        enabled_ = parameter.as_bool();
+      }
+    }
+  }
+
+  result.successful = true;
+  return result;
 }
 
 }  // namespace nav2_costmap_2d

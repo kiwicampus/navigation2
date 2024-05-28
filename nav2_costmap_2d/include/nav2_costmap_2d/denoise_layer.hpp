@@ -112,6 +112,12 @@ private:
    * @return true if the pixel value is not an obstacle code. False in other case
    */
   bool isBackground(uint8_t pixel) const;
+  /**
+   * @brief Callback executed when a parameter change is detected
+   * @param event ParameterEvent message
+   */
+  rcl_interfaces::msg::SetParametersResult
+  dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
 
 private:
   // The border value of group size. Groups of this and larger size will be kept
@@ -124,6 +130,8 @@ private:
   imgproc_impl::GroupsRemover groups_remover_;
   // Interpret NO_INFORMATION code as obstacle
   bool no_information_is_obstacle_{};
+  // Dynamic parameters handler
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
 };
 
 }  // namespace nav2_costmap_2d
