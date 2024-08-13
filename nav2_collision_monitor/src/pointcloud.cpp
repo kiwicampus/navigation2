@@ -17,7 +17,6 @@
 #include <functional>
 
 #include "sensor_msgs/point_cloud2_iterator.hpp"
-#include "tf2/transform_datatypes.h"
 
 #include "nav2_util/node_utils.hpp"
 #include "nav2_util/robot_utils.hpp"
@@ -68,7 +67,7 @@ void PointCloud::configure()
 
 bool PointCloud::getData(
   const rclcpp::Time & curr_time,
-  std::vector<Point> & data)
+  std::vector<Point> & data) const
 {
   // Ignore data from the source if it is not being published yet or
   // not published for a long time

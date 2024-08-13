@@ -18,8 +18,6 @@
 #include <cmath>
 #include <functional>
 
-#include "tf2/transform_datatypes.h"
-
 #include "nav2_util/node_utils.hpp"
 #include "nav2_util/robot_utils.hpp"
 
@@ -69,7 +67,7 @@ void Range::configure()
 
 bool Range::getData(
   const rclcpp::Time & curr_time,
-  std::vector<Point> & data)
+  std::vector<Point> & data) const
 {
   // Ignore data from the source if it is not being published yet or
   // not being published for a long time

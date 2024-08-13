@@ -54,40 +54,42 @@ public:
   /**
    * @brief Overrides TF2 subscription callback to inject base footprint publisher
    */
-  void subscription_callback(tf2_msgs::msg::TFMessage::ConstSharedPtr msg, bool is_static) override
-  {
-    TransformListener::subscription_callback(msg, is_static);
 
-    if (is_static) {
-      return;
-    }
+  // ON IRON THIS FUNCTION IS PRIVATE SO IT CANNOT BE OVERRIDEN
+  // void subscription_callback(tf2_msgs::msg::TFMessage::ConstSharedPtr msg, bool is_static) override
+  // {
+  //   TransformListener::subscription_callback(msg, is_static);
 
-    for (unsigned int i = 0; i != msg->transforms.size(); i++) {
-      auto & t = msg->transforms[i];
-      if (t.child_frame_id == base_link_frame_) {
-        geometry_msgs::msg::TransformStamped transform;
-        transform.header.stamp = t.header.stamp;
-        transform.header.frame_id = base_link_frame_;
-        transform.child_frame_id = base_footprint_frame_;
+  //   if (is_static) {
+  //     return;
+  //   }
 
-        // Project to Z-zero
-        transform.transform.translation = t.transform.translation;
-        transform.transform.translation.z = 0.0;
+  //   for (unsigned int i = 0; i != msg->transforms.size(); i++) {
+  //     auto & t = msg->transforms[i];
+  //     if (t.child_frame_id == base_link_frame_) {
+  //       geometry_msgs::msg::TransformStamped transform;
+  //       transform.header.stamp = t.header.stamp;
+  //       transform.header.frame_id = base_link_frame_;
+  //       transform.child_frame_id = base_footprint_frame_;
 
-        // Remove Roll and Pitch
-        tf2::Quaternion q;
-        q.setRPY(0, 0, tf2::getYaw(t.transform.rotation));
-        q.normalize();
-        transform.transform.rotation.x = q.x();
-        transform.transform.rotation.y = q.y();
-        transform.transform.rotation.z = q.z();
-        transform.transform.rotation.w = q.w();
+  //       // Project to Z-zero
+  //       transform.transform.translation = t.transform.translation;
+  //       transform.transform.translation.z = 0.0;
 
-        tf_broadcaster_->sendTransform(transform);
-        return;
-      }
-    }
-  }
+  //       // Remove Roll and Pitch
+  //       tf2::Quaternion q;
+  //       q.setRPY(0, 0, tf2::getYaw(t.transform.rotation));
+  //       q.normalize();
+  //       transform.transform.rotation.x = q.x();
+  //       transform.transform.rotation.y = q.y();
+  //       transform.transform.rotation.z = q.z();
+  //       transform.transform.rotation.w = q.w();
+
+  //       tf_broadcaster_->sendTransform(transform);
+  //       return;
+  //     }
+  //   }
+  // }
 
 protected:
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;

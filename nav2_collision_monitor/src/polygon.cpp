@@ -19,7 +19,6 @@
 
 #include "geometry_msgs/msg/point.hpp"
 #include "geometry_msgs/msg/point32.hpp"
-#include "tf2/transform_datatypes.h"
 
 #include "nav2_util/node_utils.hpp"
 #include "nav2_util/robot_utils.hpp"
@@ -196,7 +195,7 @@ void Polygon::updatePolygon(const Velocity & /*cmd_vel_in*/)
     std::size_t new_size = polygon_.polygon.points.size();
 
     // Get the transform from PolygonStamped frame to base_frame_id_
-    tf2::Stamped<tf2::Transform> tf_transform;
+    tf2::Transform tf_transform;
     if (
       !nav2_util::getTransform(
         polygon_.header.frame_id, base_frame_id_,
@@ -238,12 +237,7 @@ double Polygon::getCollisionTime(
   Velocity vel = velocity;
 
   // Array of points transformed to the frame concerned with pose on each simulation step
-  std::vector<Point> points_transformed = collision_points;
-
-  // Check static polygon
-  if (getPointsInside(points_transformed) >= min_points_) {
-    return 0.0;
-  }
+  std::vector<Point> points_transformed;
 
   // Robot movement simulation
   for (double time = 0.0; time <= time_before_collision_; time += simulation_time_step_) {
@@ -484,7 +478,7 @@ void Polygon::updatePolygon(geometry_msgs::msg::PolygonStamped::ConstSharedPtr m
   }
 
   // Get the transform from PolygonStamped frame to base_frame_id_
-  tf2::Stamped<tf2::Transform> tf_transform;
+  tf2::Transform tf_transform;
   if (
     !nav2_util::getTransform(
       msg->header.frame_id, base_frame_id_,
