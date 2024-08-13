@@ -97,6 +97,13 @@ struct LatticeMotionTable
    */
   float & getAngleFromBin(const unsigned int & bin_idx);
 
+  /**
+   * @brief Get the angular bin to use from a raw orientation
+   * @param theta Angle in radians
+   * @return bin index of closest angle to request
+   */
+  double getAngle(const double & theta);
+
   unsigned int size_x;
   unsigned int num_angle_quantization;
   float change_penalty;
@@ -132,7 +139,7 @@ public:
    * @brief A constructor for nav2_smac_planner::NodeLattice
    * @param index The index of this node for self-reference
    */
-  explicit NodeLattice(const unsigned int index);
+  explicit NodeLattice(const uint64_t index);
 
   /**
    * @brief A destructor for nav2_smac_planner::NodeLattice
@@ -229,7 +236,7 @@ public:
    * @brief Gets cell index
    * @return Reference to cell index
    */
-  inline unsigned int getIndex()
+  inline uint64_t getIndex()
   {
     return _index;
   }
@@ -281,7 +288,7 @@ public:
    * @param angle Theta coordinate of point
    * @return Index
    */
-  static inline unsigned int getIndex(
+  static inline uint64_t getIndex(
     const unsigned int & x, const unsigned int & y, const unsigned int & angle)
   {
     // Hybrid-A* and State Lattice share a coordinate system
@@ -298,7 +305,7 @@ public:
    * @return Coordinates
    */
   static inline Coordinates getCoords(
-    const unsigned int & index,
+    const uint64_t & index,
     const unsigned int & width, const unsigned int & angle_quantization)
   {
     // Hybrid-A* and State Lattice share a coordinate system
@@ -396,7 +403,7 @@ public:
    * @param neighbors Vector of neighbors to be filled
    */
   void getNeighbors(
-    std::function<bool(const unsigned int &,
+    std::function<bool(const uint64_t &,
     nav2_smac_planner::NodeLattice * &)> & validity_checker,
     GridCollisionChecker * collision_checker,
     const bool & traverse_unknown,
@@ -425,7 +432,7 @@ public:
 private:
   float _cell_cost;
   float _accumulated_cost;
-  unsigned int _index;
+  uint64_t _index;
   bool _was_visited;
   MotionPrimitive * _motion_primitive;
   bool _backwards;

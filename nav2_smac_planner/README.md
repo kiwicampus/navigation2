@@ -17,7 +17,7 @@ We have users reporting using this on:
 - Vertical farming
 - Solar farms
 
-See its [Configuration Guide Page](https://navigation.ros.org/configuration/packages/configuring-smac-planner.html) for additional parameter descriptions.
+See its [Configuration Guide Page](https://docs.nav2.org/configuration/packages/configuring-smac-planner.html) for additional parameter descriptions.
 
 ## Introduction
 
@@ -102,7 +102,7 @@ planner_server:
     planner_plugins: ["GridBased"]
 
     GridBased:
-      plugin: "nav2_smac_planner/SmacPlannerHybrid"
+      plugin: "nav2_smac_planner::SmacPlannerHybrid"
       tolerance: 0.5                      # tolerance for planning if unable to reach exact pose, in meters
       downsample_costmap: false           # whether or not to downsample the map
       downsampling_factor: 1              # multiplier for the resolution of the costmap layer (e.g. 2 on a 5cm costmap would be 10cm)

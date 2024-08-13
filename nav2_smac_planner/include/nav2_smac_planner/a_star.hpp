@@ -49,13 +49,13 @@ class AStarAlgorithm
 {
 public:
   typedef NodeT * NodePtr;
-  typedef robin_hood::unordered_node_map<unsigned int, NodeT> Graph;
+  typedef robin_hood::unordered_node_map<uint64_t, NodeT> Graph;
   typedef std::vector<NodePtr> NodeVector;
   typedef std::pair<float, NodeBasic<NodeT>> NodeElement;
   typedef typename NodeT::Coordinates Coordinates;
   typedef typename NodeT::CoordinateVector CoordinateVector;
   typedef typename NodeVector::iterator NeighborIterator;
-  typedef std::function<bool (const unsigned int &, NodeT * &)> NodeGetter;
+  typedef std::function<bool (const uint64_t &, NodeT * &)> NodeGetter;
 
   /**
    * @struct nav2_smac_planner::NodeComparator
@@ -129,8 +129,8 @@ public:
    * @param dim_3 The node dim_3 index of the goal
    */
   void setGoal(
-    const unsigned int & mx,
-    const unsigned int & my,
+    const float & mx,
+    const float & my,
     const unsigned int & dim_3);
 
   /**
@@ -140,8 +140,8 @@ public:
    * @param dim_3 The node dim_3 index of the goal
    */
   void setStart(
-    const unsigned int & mx,
-    const unsigned int & my,
+    const float & mx,
+    const float & my,
     const unsigned int & dim_3);
 
   /**
@@ -210,7 +210,7 @@ protected:
    * @brief Adds node to graph
    * @param index Node index to add
    */
-  inline NodePtr addToGraph(const unsigned int & index);
+  inline NodePtr addToGraph(const uint64_t & index);
 
   /**
    * @brief Check if this node is the goal node
@@ -250,13 +250,8 @@ protected:
   inline void populateExpansionsLog(
     const NodePtr & node, std::vector<std::tuple<float, float, float>> * expansions_log);
 
-  /**
-   * @brief Clear Start
-   */
-  void clearStart();
-
-
   bool _traverse_unknown;
+  bool _is_initialized;
   int _max_iterations;
   int _max_on_approach_iterations;
   int _terminal_checking_interval;

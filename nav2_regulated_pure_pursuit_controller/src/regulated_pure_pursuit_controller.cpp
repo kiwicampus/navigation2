@@ -20,7 +20,7 @@
 #include <vector>
 #include <utility>
 
-#include "nav2_amcl/angleutils.hpp"
+#include "angles/angles.h"
 #include "nav2_regulated_pure_pursuit_controller/regulated_pure_pursuit_controller.hpp"
 #include "nav2_core/controller_exceptions.hpp"
 #include "nav2_util/node_utils.hpp"
@@ -76,6 +76,8 @@ void RegulatedPurePursuitController::configure(
   carrot_pub_ = node->create_publisher<geometry_msgs::msg::PointStamped>("lookahead_point", 1);
   curvature_carrot_pub_ = node->create_publisher<geometry_msgs::msg::PointStamped>(
     "curvature_lookahead_point", 1);
+  is_rotating_to_heading_pub_ = node->create_publisher<std_msgs::msg::Bool>(
+    "is_rotating_to_heading", 1);
 }
 
 void RegulatedPurePursuitController::cleanup()
@@ -88,6 +90,7 @@ void RegulatedPurePursuitController::cleanup()
   global_path_pub_.reset();
   carrot_pub_.reset();
   curvature_carrot_pub_.reset();
+  is_rotating_to_heading_pub_.reset();
 }
 
 void RegulatedPurePursuitController::activate()
@@ -100,6 +103,7 @@ void RegulatedPurePursuitController::activate()
   global_path_pub_->on_activate();
   carrot_pub_->on_activate();
   curvature_carrot_pub_->on_activate();
+  is_rotating_to_heading_pub_->on_activate();
 }
 
 void RegulatedPurePursuitController::deactivate()
@@ -112,6 +116,7 @@ void RegulatedPurePursuitController::deactivate()
   global_path_pub_->on_deactivate();
   carrot_pub_->on_deactivate();
   curvature_carrot_pub_->on_deactivate();
+  is_rotating_to_heading_pub_->on_deactivate();
 }
 
 std::unique_ptr<geometry_msgs::msg::PointStamped> RegulatedPurePursuitController::createCarrotMsg(
@@ -228,15 +233,35 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
   //        - otherwise equal to curvature_lookahead_pose (which can be interpolated after goal)
   double angle_to_heading;
   if (shouldRotateToGoalHeading(carrot_pose)) {
+    is_rotating_to_heading_ = true;
     double angle_to_goal = tf2::getYaw(transformed_plan.poses.back().pose.orientation);
     rotateToHeading(linear_vel, angular_vel, angle_to_goal, speed);
   } else if (shouldRotateToPath(rotate_to_path_carrot_pose, angle_to_heading, x_vel_sign)) {
+    is_rotating_to_heading_ = true;
     rotateToHeading(linear_vel, angular_vel, angle_to_heading, speed);
   } else {
+    is_rotating_to_heading_ = false;
     applyConstraints(
       regulation_curvature, speed,
       collision_checker_->costAtPose(pose.pose.position.x, pose.pose.position.y), transformed_plan,
       linear_vel, x_vel_sign);
+
+    if (cancelling_) {
+      const double & dt = control_duration_;
+      linear_vel = speed.linear.x - x_vel_sign * dt * params_->cancel_deceleration;
+
+      if (x_vel_sign > 0) {
+        if (linear_vel <= 0) {
+          linear_vel = 0;
+          finished_cancelling_ = true;
+        }
+      } else {
+        if (linear_vel >= 0) {
+          linear_vel = 0;
+          finished_cancelling_ = true;
+        }
+      }
+    }
 
     // Apply curvature to angular velocity after constraining linear velocity
     angular_vel = linear_vel * regulation_curvature;
@@ -250,12 +275,27 @@ geometry_msgs::msg::TwistStamped RegulatedPurePursuitController::computeVelocity
     throw nav2_core::NoValidControl("RegulatedPurePursuitController detected collision ahead!");
   }
 
+  // Publish whether we are rotating to goal heading
+  std_msgs::msg::Bool is_rotating_to_heading_msg;
+  is_rotating_to_heading_msg.data = is_rotating_to_heading_;
+  is_rotating_to_heading_pub_->publish(is_rotating_to_heading_msg);
+
   // populate and return message
   geometry_msgs::msg::TwistStamped cmd_vel;
   cmd_vel.header = pose.header;
   cmd_vel.twist.linear.x = linear_vel;
   cmd_vel.twist.angular.z = angular_vel;
   return cmd_vel;
+}
+
+bool RegulatedPurePursuitController::cancel()
+{
+  // if false then publish zero velocity
+  if (!params_->use_cancel_deceleration) {
+    return true;
+  }
+  cancelling_ = true;
+  return finished_cancelling_;
 }
 
 bool RegulatedPurePursuitController::shouldRotateToPath(
@@ -266,7 +306,7 @@ bool RegulatedPurePursuitController::shouldRotateToPath(
   angle_to_path = atan2(carrot_pose.pose.position.y, carrot_pose.pose.position.x);
   // In case we are reversing
   if (x_vel_sign < 0.0) {
-    angle_to_path = nav2_amcl::angleutils::normalize(angle_to_path + M_PI);
+    angle_to_path = angles::normalize_angle(angle_to_path + M_PI);
   }
   return params_->use_rotate_to_heading &&
          fabs(angle_to_path) > params_->rotate_to_heading_min_angle;
@@ -443,6 +483,12 @@ void RegulatedPurePursuitController::setSpeedLimit(
       params_->desired_linear_vel = speed_limit;
     }
   }
+}
+
+void RegulatedPurePursuitController::reset()
+{
+  cancelling_ = false;
+  finished_cancelling_ = false;
 }
 
 double RegulatedPurePursuitController::findVelocitySignChange(

@@ -27,6 +27,7 @@
 #include "pluginlib/class_loader.hpp"
 #include "pluginlib/class_list_macros.hpp"
 #include "geometry_msgs/msg/pose2_d.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "nav2_regulated_pure_pursuit_controller/path_handler.hpp"
 #include "nav2_regulated_pure_pursuit_controller/collision_checker.hpp"
 #include "nav2_regulated_pure_pursuit_controller/parameter_handler.hpp"
@@ -96,6 +97,8 @@ public:
     const geometry_msgs::msg::Twist & velocity,
     nav2_core::GoalChecker * /*goal_checker*/) override;
 
+  bool cancel() override;
+
   /**
    * @brief nav2_core setPlan - Sets the global plan
    * @param path The global plan
@@ -110,6 +113,8 @@ public:
    * or in absolute values in false case.
    */
   void setSpeedLimit(const double & speed_limit, const bool & percentage) override;
+
+  void reset() override;
 
 protected:
   /**
@@ -212,12 +217,17 @@ protected:
   Parameters * params_;
   double goal_dist_tol_;
   double control_duration_;
+  bool cancelling_ = false;
+  bool finished_cancelling_ = false;
+  bool is_rotating_to_heading_ = false;
 
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>> global_path_pub_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PointStamped>>
   carrot_pub_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PointStamped>>
   curvature_carrot_pub_;
+  std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<std_msgs::msg::Bool>>
+  is_rotating_to_heading_pub_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>> carrot_arc_pub_;
   std::unique_ptr<nav2_regulated_pure_pursuit_controller::PathHandler> path_handler_;
   std::unique_ptr<nav2_regulated_pure_pursuit_controller::ParameterHandler> param_handler_;

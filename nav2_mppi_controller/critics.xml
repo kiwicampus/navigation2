@@ -21,10 +21,6 @@
       <description>mppi critic for aligning to path</description>
     </class>
 
-    <class type="mppi::critics::PathAlignLegacyCritic" base_class_type="mppi::critics::CriticFunction">
-      <description>mppi critic for aligning to path (legacy)</description>
-    </class>
-
     <class type="mppi::critics::PathAngleCritic" base_class_type="mppi::critics::CriticFunction">
       <description>mppi critic for tracking the path in the correct heading</description>
     </class>
@@ -43,6 +39,10 @@
 
     <class type="mppi::critics::ConstraintCritic" base_class_type="mppi::critics::CriticFunction">
       <description>mppi critic for incentivizing moving within kinematic and dynamic bounds</description>
+    </class>
+
+    <class type="mppi::critics::VelocityDeadbandCritic" base_class_type="mppi::critics::CriticFunction">
+      <description>mppi critic for restricting command velocities in deadband range</description>
     </class>
 
   </library>

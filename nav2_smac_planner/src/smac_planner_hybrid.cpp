@@ -286,6 +286,16 @@ void SmacPlannerHybrid::activate()
   // Add callback for dynamic parameters
   _dyn_params_handler = node->add_on_set_parameters_callback(
     std::bind(&SmacPlannerHybrid::dynamicParametersCallback, this, _1));
+
+  // Special case handling to obtain resolution changes in global costmap
+  auto resolution_remote_cb = [this](const rclcpp::Parameter & p) {
+      auto node = _node.lock();
+      dynamicParametersCallback(
+        {rclcpp::Parameter("resolution", rclcpp::ParameterValue(p.as_double()))});
+    };
+  _remote_param_subscriber = std::make_shared<rclcpp::ParameterEventHandler>(_node.lock());
+  _remote_resolution_handler = _remote_param_subscriber->add_parameter_callback(
+    "resolution", resolution_remote_cb, "global_costmap/global_costmap");
 }
 
 void SmacPlannerHybrid::deactivate()
@@ -301,6 +311,11 @@ void SmacPlannerHybrid::deactivate()
   if (_costmap_downsampler) {
     _costmap_downsampler->on_deactivate();
   }
+  // shutdown dyn_param_handler
+  auto node = _node.lock();
+  if (_dyn_params_handler && node) {
+    node->remove_on_set_parameters_callback(_dyn_params_handler.get());
+  }
   _dyn_params_handler.reset();
 }
 
@@ -309,6 +324,7 @@ void SmacPlannerHybrid::cleanup()
   RCLCPP_INFO(
     _logger, "Cleaning up plugin %s of type SmacPlannerHybrid",
     _name.c_str());
+  nav2_smac_planner::NodeHybrid::destroyStaticAssets();
   _a_star.reset();
   _smoother.reset();
   if (_costmap_downsampler) {
@@ -345,8 +361,8 @@ nav_msgs::msg::Path SmacPlannerHybrid::createPlan(
   _a_star->setCollisionChecker(&_collision_checker);
 
   // Set starting point, in A* bin search coordinates
-  unsigned int mx, my;
-  if (!costmap->worldToMap(start.pose.position.x, start.pose.position.y, mx, my)) {
+  float mx, my;
+  if (!costmap->worldToMapContinuous(start.pose.position.x, start.pose.position.y, mx, my)) {
     throw nav2_core::StartOutsideMapBounds(
             "Start Coordinates of(" + std::to_string(start.pose.position.x) + ", " +
             std::to_string(start.pose.position.y) + ") was outside bounds");
@@ -364,7 +380,7 @@ nav_msgs::msg::Path SmacPlannerHybrid::createPlan(
   _a_star->setStart(mx, my, orientation_bin_id);
 
   // Set goal point, in A* bin search coordinates
-  if (!costmap->worldToMap(goal.pose.position.x, goal.pose.position.y, mx, my)) {
+  if (!costmap->worldToMapContinuous(goal.pose.position.x, goal.pose.position.y, mx, my)) {
     throw nav2_core::GoalOutsideMapBounds(
             "Goal Coordinates of(" + std::to_string(goal.pose.position.x) + ", " +
             std::to_string(goal.pose.position.y) + ") was outside bounds");
@@ -560,6 +576,14 @@ SmacPlannerHybrid::dynamicParametersCallback(std::vector<rclcpp::Parameter> para
       } else if (name == _name + ".analytic_expansion_max_cost") {
         reinit_a_star = true;
         _search_info.analytic_expansion_max_cost = static_cast<float>(parameter.as_double());
+      } else if (name == "resolution") {
+        // Special case: When the costmap's resolution changes, need to reinitialize
+        // the controller to have new resolution information
+        RCLCPP_INFO(_logger, "Costmap resolution changed. Reinitializing SmacPlannerHybrid.");
+        reinit_collision_checker = true;
+        reinit_a_star = true;
+        reinit_downsampler = true;
+        reinit_smoother = true;
       }
     } else if (type == ParameterType::PARAMETER_BOOL) {
       if (name == _name + ".downsample_costmap") {

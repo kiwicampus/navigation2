@@ -36,7 +36,7 @@ bool PathLongerOnApproach::isPathUpdated(
 {
   return new_path != old_path && old_path.poses.size() != 0 &&
          new_path.poses.size() != 0 &&
-         old_path.poses.back() == new_path.poses.back();
+         old_path.poses.back().pose == new_path.poses.back().pose;
 }
 
 bool PathLongerOnApproach::isRobotInGoalProximity(
@@ -62,12 +62,13 @@ inline BT::NodeStatus PathLongerOnApproach::tick()
   getInput("prox_len", prox_len_);
   getInput("length_factor", length_factor_);
 
-  if (!BT::isStatusActive(status())) {
-    // Reset the starting point since we're starting a new iteration of
-    // PathLongerOnApproach (moving from IDLE to RUNNING)
-    first_time_ = true;
+  if (first_time_ == false) {
+    if (old_path_.poses.empty() || new_path_.poses.empty() ||
+      old_path_.poses.back() != new_path_.poses.back())
+    {
+      first_time_ = true;
+    }
   }
-
   setStatus(BT::NodeStatus::RUNNING);
 
   // Check if the path is updated and valid, compare the old and the new path length,

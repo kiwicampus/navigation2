@@ -180,7 +180,7 @@ typename AnalyticExpansion<NodeT>::AnalyticExpansionNodes AnalyticExpansion<Node
   float d = state_space->distance(from(), to());
 
   // A move of sqrt(2) is guaranteed to be in a new cell
-  static const float sqrt_2 = std::sqrt(2.0f);
+  static const float sqrt_2 = sqrtf(2.0f);
 
   // If the length is too far, exit. This prevents unsafe shortcutting of paths
   // into higher cost areas far out from the goal itself, let search to the work of getting
@@ -201,7 +201,7 @@ typename AnalyticExpansion<NodeT>::AnalyticExpansionNodes AnalyticExpansion<Node
 
   // Pre-allocate
   NodePtr prev(node);
-  unsigned int index = 0;
+  uint64_t index = 0;
   NodePtr next(nullptr);
   float angle = 0.0;
   Coordinates proposed_coordinates;
@@ -210,13 +210,13 @@ typename AnalyticExpansion<NodeT>::AnalyticExpansionNodes AnalyticExpansion<Node
   node_costs.reserve(num_intervals);
 
   // Check intermediary poses (non-goal, non-start)
-  for (float i = 1; i < num_intervals; i++) {
+  for (float i = 1; i <= num_intervals; i++) {
     state_space->interpolate(from(), to(), i / num_intervals, s());
     reals = s.reals();
     // Make sure in range [0, 2PI)
     theta = (reals[2] < 0.0) ? (reals[2] + 2.0 * M_PI) : reals[2];
     theta = (theta > 2.0 * M_PI) ? (theta - 2.0 * M_PI) : theta;
-    angle = node->motion_table.getClosestAngularBin(theta);
+    angle = node->motion_table.getAngle(theta);
 
     // Turn the pose into a node, and check if it is valid
     index = NodeT::getIndex(

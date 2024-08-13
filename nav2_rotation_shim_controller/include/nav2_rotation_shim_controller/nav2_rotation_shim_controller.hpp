@@ -24,13 +24,9 @@
 #include "rclcpp/rclcpp.hpp"
 #include "pluginlib/class_loader.hpp"
 #include "pluginlib/class_list_macros.hpp"
-#include "nav2_util/geometry_utils.hpp"
-#include "nav2_util/robot_utils.hpp"
 #include "nav2_core/controller.hpp"
 #include "nav2_core/controller_exceptions.hpp"
-#include "nav2_util/node_utils.hpp"
 #include "nav2_costmap_2d/footprint_collision_checker.hpp"
-#include "angles/angles.h"
 
 namespace nav2_rotation_shim_controller
 {
@@ -116,6 +112,13 @@ protected:
   geometry_msgs::msg::PoseStamped getSampledPathPt();
 
   /**
+   * @brief Find the goal point in path
+   * May throw exception if the path is empty
+   * @return pt location of the output point
+   */
+  geometry_msgs::msg::PoseStamped getSampledPathGoal();
+
+  /**
    * @brief Uses TF to find the location of the sampled path point in base frame
    * @param pt location of the sampled path point
    * @return location of the pose in base frame
@@ -168,6 +171,7 @@ protected:
   double forward_sampling_distance_, angular_dist_threshold_;
   double rotate_to_heading_angular_vel_, max_angular_accel_;
   double control_duration_, simulate_ahead_time_;
+  bool rotate_to_goal_heading_;
 
   // Dynamic parameters handler
   std::mutex mutex_;

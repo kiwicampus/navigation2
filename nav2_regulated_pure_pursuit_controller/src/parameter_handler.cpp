@@ -32,6 +32,7 @@ ParameterHandler::ParameterHandler(
   std::string & plugin_name, rclcpp::Logger & logger,
   const double costmap_size_x)
 {
+  node_ = node;
   plugin_name_ = plugin_name;
   logger_ = logger;
 
@@ -85,6 +86,10 @@ ParameterHandler::ParameterHandler(
     node, plugin_name_ + ".rotate_to_heading_min_angle", rclcpp::ParameterValue(0.785));
   declare_parameter_if_not_declared(
     node, plugin_name_ + ".max_angular_accel", rclcpp::ParameterValue(3.2));
+  declare_parameter_if_not_declared(
+    node, plugin_name_ + ".use_cancel_deceleration", rclcpp::ParameterValue(false));
+  declare_parameter_if_not_declared(
+    node, plugin_name_ + ".cancel_deceleration", rclcpp::ParameterValue(3.2));
   declare_parameter_if_not_declared(
     node, plugin_name_ + ".allow_reversing", rclcpp::ParameterValue(false));
   declare_parameter_if_not_declared(
@@ -151,6 +156,8 @@ ParameterHandler::ParameterHandler(
   node->get_parameter(
     plugin_name_ + ".rotate_to_heading_min_angle", params_.rotate_to_heading_min_angle);
   node->get_parameter(plugin_name_ + ".max_angular_accel", params_.max_angular_accel);
+  node->get_parameter(plugin_name_ + ".use_cancel_deceleration", params_.use_cancel_deceleration);
+  node->get_parameter(plugin_name_ + ".cancel_deceleration", params_.cancel_deceleration);
   node->get_parameter(plugin_name_ + ".allow_reversing", params_.allow_reversing);
   node->get_parameter(
     plugin_name_ + ".max_robot_pose_search_dist",
@@ -186,6 +193,15 @@ ParameterHandler::ParameterHandler(
     std::bind(
       &ParameterHandler::dynamicParametersCallback,
       this, std::placeholders::_1));
+}
+
+ParameterHandler::~ParameterHandler()
+{
+  auto node = node_.lock();
+  if (dyn_params_handler_ && node) {
+    node->remove_on_set_parameters_callback(dyn_params_handler_.get());
+  }
+  dyn_params_handler_.reset();
 }
 
 rcl_interfaces::msg::SetParametersResult
@@ -237,6 +253,8 @@ ParameterHandler::dynamicParametersCallback(
         params_.regulated_linear_scaling_min_speed = parameter.as_double();
       } else if (name == plugin_name_ + ".max_angular_accel") {
         params_.max_angular_accel = parameter.as_double();
+      } else if (name == plugin_name_ + ".cancel_deceleration") {
+        params_.cancel_deceleration = parameter.as_double();
       } else if (name == plugin_name_ + ".rotate_to_heading_min_angle") {
         params_.rotate_to_heading_min_angle = parameter.as_double();
       }
@@ -253,6 +271,8 @@ ParameterHandler::dynamicParametersCallback(
         params_.use_collision_detection = parameter.as_bool();
       } else if (name == plugin_name_ + ".use_rotate_to_heading") {
         params_.use_rotate_to_heading = parameter.as_bool();
+      } else if (name == plugin_name_ + ".use_cancel_deceleration") {
+        params_.use_cancel_deceleration = parameter.as_bool();
       } else if (name == plugin_name_ + ".allow_reversing") {
         if (params_.use_rotate_to_heading && parameter.as_bool()) {
           RCLCPP_WARN(

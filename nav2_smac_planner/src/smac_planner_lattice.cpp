@@ -250,6 +250,11 @@ void SmacPlannerLattice::deactivate()
     _expansions_publisher->on_deactivate();
     _planned_footprints_publisher->on_deactivate();
   }
+  // shutdown dyn_param_handler
+  auto node = _node.lock();
+  if (_dyn_params_handler && node) {
+    node->remove_on_set_parameters_callback(_dyn_params_handler.get());
+  }
   _dyn_params_handler.reset();
 }
 
@@ -258,6 +263,7 @@ void SmacPlannerLattice::cleanup()
   RCLCPP_INFO(
     _logger, "Cleaning up plugin %s of type SmacPlannerLattice",
     _name.c_str());
+  nav2_smac_planner::NodeHybrid::destroyStaticAssets();
   _a_star.reset();
   _smoother.reset();
   _raw_plan_publisher.reset();
@@ -281,8 +287,8 @@ nav_msgs::msg::Path SmacPlannerLattice::createPlan(
   _a_star->setCollisionChecker(&_collision_checker);
 
   // Set starting point, in A* bin search coordinates
-  unsigned int mx, my;
-  if (!_costmap->worldToMap(start.pose.position.x, start.pose.position.y, mx, my)) {
+  float mx, my;
+  if (!_costmap->worldToMapContinuous(start.pose.position.x, start.pose.position.y, mx, my)) {
     throw nav2_core::StartOutsideMapBounds(
             "Start Coordinates of(" + std::to_string(start.pose.position.x) + ", " +
             std::to_string(start.pose.position.y) + ") was outside bounds");
@@ -292,7 +298,7 @@ nav_msgs::msg::Path SmacPlannerLattice::createPlan(
     NodeLattice::motion_table.getClosestAngularBin(tf2::getYaw(start.pose.orientation)));
 
   // Set goal point, in A* bin search coordinates
-  if (!_costmap->worldToMap(goal.pose.position.x, goal.pose.position.y, mx, my)) {
+  if (!_costmap->worldToMapContinuous(goal.pose.position.x, goal.pose.position.y, mx, my)) {
     throw nav2_core::GoalOutsideMapBounds(
             "Goal Coordinates of(" + std::to_string(goal.pose.position.x) + ", " +
             std::to_string(goal.pose.position.y) + ") was outside bounds");

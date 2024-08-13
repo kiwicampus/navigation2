@@ -36,6 +36,7 @@ AStarAlgorithm<NodeT>::AStarAlgorithm(
   const MotionModel & motion_model,
   const SearchInfo & search_info)
 : _traverse_unknown(true),
+  _is_initialized(false),
   _max_iterations(0),
   _terminal_checking_interval(5000),
   _max_planning_time(0),
@@ -70,7 +71,10 @@ void AStarAlgorithm<NodeT>::initialize(
   _max_on_approach_iterations = max_on_approach_iterations;
   _terminal_checking_interval = terminal_checking_interval;
   _max_planning_time = max_planning_time;
-  NodeT::precomputeDistanceHeuristic(lookup_table_size, _motion_model, dim_3_size, _search_info);
+  if (!_is_initialized) {
+    NodeT::precomputeDistanceHeuristic(lookup_table_size, _motion_model, dim_3_size, _search_info);
+  }
+  _is_initialized = true;
   _dim3_size = dim_3_size;
   _expander = std::make_unique<AnalyticExpansion<NodeT>>(
     _motion_model, _search_info, _traverse_unknown, _dim3_size);
@@ -120,7 +124,7 @@ void AStarAlgorithm<NodeT>::setCollisionChecker(GridCollisionChecker * collision
 
 template<typename NodeT>
 typename AStarAlgorithm<NodeT>::NodePtr AStarAlgorithm<NodeT>::addToGraph(
-  const unsigned int & index)
+  const uint64_t & index)
 {
   auto iter = _graph.find(index);
   if (iter != _graph.end()) {
@@ -132,28 +136,32 @@ typename AStarAlgorithm<NodeT>::NodePtr AStarAlgorithm<NodeT>::addToGraph(
 
 template<>
 void AStarAlgorithm<Node2D>::setStart(
-  const unsigned int & mx,
-  const unsigned int & my,
+  const float & mx,
+  const float & my,
   const unsigned int & dim_3)
 {
   if (dim_3 != 0) {
     throw std::runtime_error("Node type Node2D cannot be given non-zero starting dim 3.");
   }
-  _start = addToGraph(Node2D::getIndex(mx, my, getSizeX()));
+  _start = addToGraph(
+    Node2D::getIndex(
+      static_cast<unsigned int>(mx),
+      static_cast<unsigned int>(my),
+      getSizeX()));
 }
 
 template<typename NodeT>
 void AStarAlgorithm<NodeT>::setStart(
-  const unsigned int & mx,
-  const unsigned int & my,
+  const float & mx,
+  const float & my,
   const unsigned int & dim_3)
 {
-  _start = addToGraph(NodeT::getIndex(mx, my, dim_3));
-  _start->setPose(
-    Coordinates(
-      static_cast<float>(mx),
-      static_cast<float>(my),
-      static_cast<float>(dim_3)));
+  _start = addToGraph(
+    NodeT::getIndex(
+      static_cast<unsigned int>(mx),
+      static_cast<unsigned int>(my),
+      dim_3));
+  _start->setPose(Coordinates(mx, my, dim_3));
 }
 
 template<>
@@ -182,30 +190,35 @@ void AStarAlgorithm<NodeT>::populateExpansionsLog(
 
 template<>
 void AStarAlgorithm<Node2D>::setGoal(
-  const unsigned int & mx,
-  const unsigned int & my,
+  const float & mx,
+  const float & my,
   const unsigned int & dim_3)
 {
   if (dim_3 != 0) {
     throw std::runtime_error("Node type Node2D cannot be given non-zero goal dim 3.");
   }
 
-  _goal = addToGraph(Node2D::getIndex(mx, my, getSizeX()));
+  _goal = addToGraph(
+    Node2D::getIndex(
+      static_cast<unsigned int>(mx),
+      static_cast<unsigned int>(my),
+      getSizeX()));
   _goal_coordinates = Node2D::Coordinates(mx, my);
 }
 
 template<typename NodeT>
 void AStarAlgorithm<NodeT>::setGoal(
-  const unsigned int & mx,
-  const unsigned int & my,
+  const float & mx,
+  const float & my,
   const unsigned int & dim_3)
 {
-  _goal = addToGraph(NodeT::getIndex(mx, my, dim_3));
+  _goal = addToGraph(
+    NodeT::getIndex(
+      static_cast<unsigned int>(mx),
+      static_cast<unsigned int>(my),
+      dim_3));
 
-  typename NodeT::Coordinates goal_coords(
-    static_cast<float>(mx),
-    static_cast<float>(my),
-    static_cast<float>(dim_3));
+  typename NodeT::Coordinates goal_coords(mx, my, dim_3);
 
   if (!_search_info.cache_obstacle_heuristic || goal_coords != _goal_coordinates) {
     if (!_start) {
@@ -241,8 +254,6 @@ bool AStarAlgorithm<NodeT>::areInputsValid()
   }
 
   // Note: We do not check the if the start is valid because it is cleared
-  clearStart();
-
   return true;
 }
 
@@ -278,9 +289,11 @@ bool AStarAlgorithm<NodeT>::createPath(
   int closest_distance = std::numeric_limits<int>::max();
 
   // Given an index, return a node ptr reference if its collision-free and valid
-  const unsigned int max_index = getSizeX() * getSizeY() * getSizeDim3();
+  const uint64_t max_index = static_cast<uint64_t>(getSizeX()) *
+    static_cast<uint64_t>(getSizeY()) *
+    static_cast<uint64_t>(getSizeDim3());
   NodeGetter neighborGetter =
-    [&, this](const unsigned int & index, NodePtr & neighbor_rtn) -> bool
+    [&, this](const uint64_t & index, NodePtr & neighbor_rtn) -> bool
     {
       if (index >= max_index) {
         return false;
@@ -365,7 +378,7 @@ bool AStarAlgorithm<NodeT>::createPath(
   }
 
   if (_best_heuristic_node.first < getToleranceHeuristic()) {
-    // If we run out of serach options, return the path that is closest, if within tolerance.
+    // If we run out of search options, return the path that is closest, if within tolerance.
     return _graph.at(_best_heuristic_node.second).backtracePath(path);
   }
 
@@ -471,20 +484,6 @@ template<typename NodeT>
 unsigned int & AStarAlgorithm<NodeT>::getSizeDim3()
 {
   return _dim3_size;
-}
-
-template<>
-void AStarAlgorithm<Node2D>::clearStart()
-{
-  auto coords = Node2D::getCoords(_start->getIndex());
-  _costmap->setCost(coords.x, coords.y, nav2_costmap_2d::FREE_SPACE);
-}
-
-template<typename NodeT>
-void AStarAlgorithm<NodeT>::clearStart()
-{
-  auto coords = NodeT::getCoords(_start->getIndex(), _costmap->getSizeInCellsX(), getSizeDim3());
-  _costmap->setCost(coords.x, coords.y, nav2_costmap_2d::FREE_SPACE);
 }
 
 // Instantiate algorithm for the supported template types

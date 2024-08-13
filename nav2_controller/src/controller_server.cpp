@@ -294,6 +294,8 @@ ControllerServer::on_deactivate(const rclcpp_lifecycle::State & /*state*/)
 
   publishZeroVelocity();
   vel_publisher_->on_deactivate();
+
+  remove_on_set_parameters_callback(dyn_params_handler_.get());
   dyn_params_handler_.reset();
 
   // destroy bond connection
@@ -422,7 +424,12 @@ void ControllerServer::computeControl()
   RCLCPP_INFO(get_logger(), "Received a goal, begin computing control effort.");
 
   try {
-    std::string c_name = action_server_->get_current_goal()->controller_id;
+    auto goal = action_server_->get_current_goal();
+    if (!goal) {
+      return;  //  goal would be nullptr if action_server_ is inactivate.
+    }
+
+    std::string c_name = goal->controller_id;
     std::string current_controller;
     if (findControllerId(c_name, current_controller)) {
       current_controller_ = current_controller;
@@ -430,7 +437,7 @@ void ControllerServer::computeControl()
       throw nav2_core::InvalidController("Failed to find controller name: " + c_name);
     }
 
-    std::string gc_name = action_server_->get_current_goal()->goal_checker_id;
+    std::string gc_name = goal->goal_checker_id;
     std::string current_goal_checker;
     if (findGoalCheckerId(gc_name, current_goal_checker)) {
       current_goal_checker_ = current_goal_checker;
@@ -438,7 +445,7 @@ void ControllerServer::computeControl()
       throw nav2_core::ControllerException("Failed to find goal checker name: " + gc_name);
     }
 
-    std::string pc_name = action_server_->get_current_goal()->progress_checker_id;
+    std::string pc_name = goal->progress_checker_id;
     std::string current_progress_checker;
     if (findProgressCheckerId(pc_name, current_progress_checker)) {
       current_progress_checker_ = current_progress_checker;
@@ -446,22 +453,29 @@ void ControllerServer::computeControl()
       throw nav2_core::ControllerException("Failed to find progress checker name: " + pc_name);
     }
 
-    setPlannerPath(action_server_->get_current_goal()->path);
+    setPlannerPath(goal->path);
     progress_checkers_[current_progress_checker_]->reset();
 
     last_valid_cmd_time_ = now();
     rclcpp::WallRate loop_rate(controller_frequency_);
     while (rclcpp::ok()) {
+      auto start_time = this->now();
+
       if (action_server_ == nullptr || !action_server_->is_server_active()) {
         RCLCPP_DEBUG(get_logger(), "Action server unavailable or inactive. Stopping.");
         return;
       }
 
       if (action_server_->is_cancel_requested()) {
-        RCLCPP_INFO(get_logger(), "Goal was canceled. Stopping the robot.");
-        action_server_->terminate_all();
-        publishZeroVelocity();
-        return;
+        if (controllers_[current_controller_]->cancel()) {
+          RCLCPP_INFO(get_logger(), "Cancellation was successful. Stopping the robot.");
+          action_server_->terminate_all();
+          publishZeroVelocity();
+          return;
+        } else {
+          RCLCPP_INFO_THROTTLE(
+            get_logger(), *get_clock(), 1000, "Waiting for the controller to finish cancellation");
+        }
       }
 
       // Don't compute a trajectory until costmap is valid (after clear costmap)
@@ -479,10 +493,12 @@ void ControllerServer::computeControl()
         break;
       }
 
+      auto cycle_duration = this->now() - start_time;
       if (!loop_rate.sleep()) {
         RCLCPP_WARN(
-          get_logger(), "Control loop missed its desired rate of %.4fHz",
-          controller_frequency_);
+          get_logger(),
+          "Control loop missed its desired rate of %.4f Hz. Current loop rate is %.4f Hz.",
+          controller_frequency_, 1 / cycle_duration.seconds());
       }
     }
   } catch (nav2_core::InvalidController & e) {

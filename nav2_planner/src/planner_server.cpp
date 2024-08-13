@@ -24,7 +24,6 @@
 #include <vector>
 #include <utility>
 
-#include "builtin_interfaces/msg/duration.hpp"
 #include "lifecycle_msgs/msg/state.hpp"
 #include "nav2_util/costmap.hpp"
 #include "nav2_util/node_utils.hpp"
@@ -44,7 +43,7 @@ PlannerServer::PlannerServer(const rclcpp::NodeOptions & options)
 : nav2_util::LifecycleNode("planner_server", "", options),
   gp_loader_("nav2_core", "nav2_core::GlobalPlanner"),
   default_ids_{"GridBased"},
-  default_types_{"nav2_navfn_planner/NavfnPlanner"},
+  default_types_{"nav2_navfn_planner::NavfnPlanner"},
   costmap_(nullptr)
 {
   RCLCPP_INFO(get_logger(), "Creating");
