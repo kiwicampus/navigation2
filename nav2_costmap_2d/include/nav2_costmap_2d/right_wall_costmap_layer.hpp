@@ -96,7 +96,6 @@ private:
   double robot_x_, robot_y_, robot_yaw_;
   double prev_goal_x_, prev_goal_y_, goal_x_, goal_y_;
   std::string map_topic_;
-  bool current_;
   bool was_reset_;
   std::string global_frame_;
   bool rolling_window_;
