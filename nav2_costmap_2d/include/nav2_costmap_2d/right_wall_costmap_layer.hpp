@@ -67,8 +67,7 @@ private:
   void computeCostmap();
   void computeDistancesToWall(const std::vector<Eigen::Vector2f>& search_area,
                               const std::vector<Eigen::Vector2f>& right_wall_points,
-                              std::vector<float>& distances,
-                              double* min_x, double* min_y, double* max_x, double* max_y);
+                              std::vector<float>& distances);
   unsigned char computeCost(float distance);
   void setCost(unsigned int mx, unsigned int my, unsigned char cost);
 
