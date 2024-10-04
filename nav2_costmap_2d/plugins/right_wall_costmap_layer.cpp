@@ -24,53 +24,43 @@ RightWallCostmapLayer::~RightWallCostmapLayer()
 
 void RightWallCostmapLayer::onInitialize()
 {
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::onInitialize()");
   current_ = true;
   was_reset_ = false;
   auto node = node_.lock();
   if (!node) {
     throw std::runtime_error{"Failed to lock node"};
   }
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::onInitialize()2");
-
   declareParameter("enabled", rclcpp::ParameterValue(true));
-  declareParameter("roi_size", rclcpp::ParameterValue(20.0));          // in meters
   declareParameter("max_distance", rclcpp::ParameterValue(5.0));       // in meters
+  declareParameter("max_cost", rclcpp::ParameterValue(150.0));
+  declareParameter("min_cost", rclcpp::ParameterValue(0.0));
   declareParameter("map_topic", rclcpp::ParameterValue("/map"));
-  declareParameter("is_local", rclcpp::ParameterValue(false));
-
+  declareParameter("global_path_topic", rclcpp::ParameterValue("/nav2/cartesian_geopath"));
+  declareParameter("global_odom_topic", rclcpp::ParameterValue("/odometry/global"));
+  declareParameter("map_resolution", rclcpp::ParameterValue(0.1));
   getParameters();
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::onInitialize()3");
+  margin_ = static_cast<int>(10.0 / map_resolution_); // 10 meters of margin
 
-  // need_recalculation_ = false;
 
   // Set up subscriptions
-
   odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
-    "/odometry/global", rclcpp::SensorDataQoS(),
+    global_odom_topic_, rclcpp::SensorDataQoS(),
     std::bind(&RightWallCostmapLayer::odomCallback, this, std::placeholders::_1));
 
   path_sub_ = node->create_subscription<nav_msgs::msg::Path>(
-    "/nav2/cartesian_geopath", rclcpp::SystemDefaultsQoS(),
+    global_path_topic_, rclcpp::SystemDefaultsQoS(),
     std::bind(&RightWallCostmapLayer::pathCallback, this, std::placeholders::_1));
 
   map_sub_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
     map_topic_, rclcpp::QoS(10).transient_local().reliable().keep_last(1),
     std::bind(&RightWallCostmapLayer::mapCallback, this, std::placeholders::_1));
 
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::onInitialize()4");
-
-
-  enabled_ = true;
-  
-
   global_frame_ = layered_costmap_->getGlobalFrameID();
   rolling_window_ = layered_costmap_->isRolling();
   default_value_ = NO_INFORMATION;
-
-  need_recalculation_ = false;
+  enabled_ = true;
   matchSize();
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::onInitialize()5");
+  RCLCPP_INFO(logger_, "RightWallCostmapLayer::onInitialize() - Initialized");
 }
 
 void
@@ -96,81 +86,78 @@ void RightWallCostmapLayer::getParameters()
 {
   auto node = node_.lock();
   node->get_parameter(name_ + "." + "enabled", enabled_);
-  node->get_parameter(name_ + "." + "roi_size", roi_size_);
   node->get_parameter(name_ + "." + "max_distance", max_distance_);
+  node->get_parameter(name_ + "." + "max_cost", max_cost_);
+  node->get_parameter(name_ + "." + "min_cost", min_cost_);
   node->get_parameter(name_ + "." + "map_topic", map_topic_);
-  node->get_parameter(name_ + "." + "is_local", is_local_);
+  node->get_parameter(name_ + "." + "global_path_topic", global_path_topic_);
+  node->get_parameter(name_ + "." + "global_odom_topic", global_odom_topic_);
+  node->get_parameter(name_ + "." + "map_resolution", map_resolution_);
 
+  // Print parameters
+  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - max_distance: %f", max_distance_);
+  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - max_cost: %f", max_cost_);
+  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - min_cost: %f", min_cost_);
+  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - map_topic: %s", map_topic_.c_str());
+  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - global_path_topic: %s", global_path_topic_.c_str());
+  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - global_odom_topic: %s", global_odom_topic_.c_str());
+  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - map_resolution: %f", map_resolution_);
 }
 
 void RightWallCostmapLayer::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
-  // RCLCPP_INFO(logger_, "Received odometry message");
   std::lock_guard<std::mutex> guard(data_mutex_);
   robot_pose_.header = msg->header;
   robot_pose_.pose = msg->pose.pose;
   robot_x_ = robot_pose_.pose.position.x;
   robot_y_ = robot_pose_.pose.position.y;
-  // prev_goal_x_ = robot_pose_.pose.position.x;
-  // prev_goal_y_ = robot_pose_.pose.position.y;
 }
 
 void RightWallCostmapLayer::pathCallback(const nav_msgs::msg::Path::SharedPtr msg)
 {
   std::lock_guard<std::mutex> guard(data_mutex_);
   global_path_ = msg;
-
-  // find prev_goal_x_ and prev_goal_y_ from the path at index 0 and goal_x_, goal_y_ from the path at index 1
   path_index_ = 0;
-  if(path_index_ + 1 >= static_cast<int>(global_path_->poses.size())) {
+  if(static_cast<int>(global_path_->poses.size()) < 2) {
     RCLCPP_WARN(logger_, "RightWallCostmapLayer::pathCallback() path_index_ is out of bounds");
+    prev_goal_x_ = 0.0;
+    prev_goal_y_ = 0.0;
+    goal_x_ = 0.0;
+    goal_y_ = 0.0;
     return;
   }
   prev_goal_x_ = global_path_->poses[path_index_].pose.position.x;
   prev_goal_y_ = global_path_->poses[path_index_].pose.position.y;
   goal_x_ = global_path_->poses[path_index_+1].pose.position.x;
   goal_y_ = global_path_->poses[path_index_+1].pose.position.y;
-  // Print path
-  for (int i = 0; i < static_cast<int>(global_path_->poses.size()); i++) {
-    RCLCPP_WARN(logger_, "RightWallCostmapLayer::pathCallback() path[%d]: %f, %f", i, global_path_->poses[i].pose.position.x, global_path_->poses[i].pose.position.y);
-  }
-  // computeCostmap();
 }
 
 void RightWallCostmapLayer::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
   std::lock_guard<std::mutex> guard(data_mutex_);
-  RCLCPP_WARN(logger_, "Received map message");
   static_map_ = msg;
-  // processMap();
 }
 
 
 unsigned char RightWallCostmapLayer::computeCost(float distance)
 {
-    const float max_distance = 4.0f; // Maximum distance to consider
-    const float max_cost = 200.0f;
-    const float min_cost = 0.0f;
-
-    if (distance > max_distance)
+    if (distance > max_distance_)
     {
-        return max_cost;
+        return static_cast<unsigned char>(min_cost_);
     }
     else
     {
         // return static_cast<unsigned char>(min_cost + (max_cost - min_cost) * (1.0-std::exp(-distance / max_distance)));
-        return static_cast<unsigned char>(min_cost + (max_cost - min_cost) * distance / max_distance);
-
+        return static_cast<unsigned char>(min_cost_ + (max_cost_ - min_cost_) * distance / max_distance_);
     }
 }
 
 
 void RightWallCostmapLayer::setCost(unsigned int mx, unsigned int my, unsigned char cost)
 {
-    // Check bounds
+    // Check bounds and set cost
     if (mx < getSizeInCellsX() && my < getSizeInCellsY())
     {
-        // unsigned char* costmap = getCharMap();
         unsigned int index = getIndex(mx, my);
         costmap_[index] = cost;
     }
@@ -182,7 +169,7 @@ void RightWallCostmapLayer::computeDistancesToWall(
     const std::vector<Eigen::Vector2f>& wall_points,
     std::vector<float>& distances)
 {
-    // Build PointCloud from wall_points
+    // Create a wall object to store the wall points
     Wall wall;
     wall.pts = wall_points;
 
@@ -209,24 +196,20 @@ void RightWallCostmapLayer::computeDistancesToWall(
         resultSet.init(&ret_index, &out_dist_sqr);
         index.findNeighbors(resultSet, &query_pt[0], nanoflann::SearchParams(10));
         distances[i] = std::sqrt(out_dist_sqr);
+        // Compute the cost for the current cell based on the distance to the wall
         unsigned char cost = computeCost(distances[i]);
-        // float mx, my;
+        // Get the map coordinates of the current cell
         unsigned int mx, my;
         if (!worldToMap(search_area[i].x(), search_area[i].y(), mx, my))
         {
-
-          RCLCPP_WARN(logger_, "Computing map coords failed: %f, %f, limits: %f, %f", search_area[i].x()-robot_x_, search_area[i].y()-robot_y_, getSizeInMetersX(), getSizeInMetersY());
+          RCLCPP_WARN(logger_, "Computing map coords failed: %f, %f, limits: %f, %f", search_area[i].x(), search_area[i].y(), getSizeInMetersX(), getSizeInMetersY());
           continue;
         }
+        // Set the cost for the current cell
         setCost(mx, my, cost);
-        // touch(search_area[i].x(), search_area[i].y(), &last_min_x_, &last_min_y_, &last_max_x_, &last_max_y_);
     }
 }
 
-
-// The method is called to ask the plugin: which area of costmap it needs to update.
-// Inside this method window bounds are re-calculated if need_recalculation_ is true
-// and updated independently on its value.
 void RightWallCostmapLayer::updateBounds(double robot_x, double robot_y, double /*robot_yaw*/,
                                              double* min_x, double* min_y, double* max_x,
                                              double* max_y)
@@ -259,15 +242,9 @@ void RightWallCostmapLayer::updateBounds(double robot_x, double robot_y, double 
   current_ = true;
 }
 
-// The method is called when costmap recalculation is required.
-// It updates the costmap within its window bounds.
-// Inside this method the costmap gradient is generated and is writing directly
-// to the resulting costmap master_grid without any merging with previous layers.
 void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int min_i,
                                             int min_j, int max_i, int max_j)
 {
-  // RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts(): min_i: %d, min_j: %d, max_i: %d, max_j: %d", min_i, min_j, max_i, max_j);
-  // RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() called");
   std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
   if (!enabled_)
   {
@@ -280,231 +257,123 @@ void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid,
     was_reset_ = false;
     current_ = true;
   }
-  // if (!costmap_)
-  // {
-  //   return;
-  // }
-
-  if(prev_goal_x_ == 0.0 && prev_goal_y_ == 0.0) {
+  if(global_path_ == nullptr || global_path_->poses.size() < 2)
+  {
+    RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() global_path_ is null or has less than 2 poses");
     return;
   }
 
-  // --------------------- Update costmap values --------------------------
- 
-  // Update the goal points
-  // If global path is not available, return
-  if(global_path_ == nullptr) {
-    return;
-  }
-   // Check if the robot has reached the goal point
+  // Check if the robot has reached the goal point and update the path index
   double distance_to_goal = distance(robot_x_, robot_y_, goal_x_, goal_y_);
   if(distance_to_goal < 6.0) {
     path_index_++;
+    update_costmap_ = true;
   }
   if(path_index_ + 1 >= static_cast<int>(global_path_->poses.size())) {
       path_index_--;
-      // return;
   }
-  prev_goal_x_ = global_path_->poses[path_index_].pose.position.x;
-  prev_goal_y_ = global_path_->poses[path_index_].pose.position.y;
   goal_x_ = global_path_->poses[path_index_+1].pose.position.x;
   goal_y_ = global_path_->poses[path_index_+1].pose.position.y;
-  // RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() prev_goal_x_: %f, prev_goal_y_: %f, goal_x_: %f, goal_y_: %f", prev_goal_x_, prev_goal_y_, goal_x_, goal_y_);
 
-  if(num_files_ < 5) {
-    num_files_++;
-    // Open a CSV file to write the data
-    std::ofstream walls_file("/workspace/scripts/keep_right/walls_data" + std::to_string(num_files_) + ".csv");
-    std::ofstream space_file("/workspace/scripts/keep_right/search_space" + std::to_string(num_files_) + ".csv");
-    
-    if (!walls_file.is_open())
+  if(update_costmap_) 
+  {
+    RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() path_index_: %d, size: %zu", path_index_, global_path_->poses.size());
+    // Iterate through waypoint pairs in the global path
+    for (size_t idx = path_index_; idx < global_path_->poses.size() - 1; ++idx)
     {
-        RCLCPP_ERROR(logger_, "Failed to open file for writing.");
-        return;
-    }
-    if (!space_file.is_open())
-    {
-        RCLCPP_ERROR(logger_, "Failed to open file for writing.");
-        return;
-    }
-    walls_file << "robot_x,robot_y,goal_x,goal_y,wall_x,wall_y,is_right_wall\n";
-    space_file << "x,y\n";
-    Eigen::Vector2f robot_position(prev_goal_x_, prev_goal_y_);
-    Eigen::Vector2f goal_position(goal_x_, goal_y_);
-    Eigen::Vector2f goal_direction = goal_position - robot_position;
-    Eigen::Vector2f perpendicular_direction(goal_direction.y(), -goal_direction.x());
+      // Get start and goal waypoints
+      double wx1 = global_path_->poses[idx].pose.position.x;
+      double wy1 = global_path_->poses[idx].pose.position.y;
+      double wx2 = global_path_->poses[idx+1].pose.position.x;
+      double wy2 = global_path_->poses[idx+1].pose.position.y;
 
-    std::vector<Eigen::Vector2f> right_wall_points;
-    std::vector<Eigen::Vector2f> left_wall_points;
-    std::vector<Eigen::Vector2f> search_area;
+      // Check if at least the previous waypoint is within the costmap bounds
+      unsigned int mx1, my1;
+      if (!worldToMap(wx1, wy1, mx1, my1))
+      {
+        continue;
+        RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() - first point out of bounds");
+      }
+      int mx2, my2;
+      worldToMapNoBounds(wx2, wy2, mx2, my2);
 
-    int min_i_map = std::max(0, static_cast<int>((prev_goal_x_ - roi_size_/2)/map_resolution_));
-    int min_j_map = std::max(0, static_cast<int>((prev_goal_y_ - roi_size_/2)/map_resolution_));
-    int max_i_map = std::min(static_cast<int>(static_map_->info.width), static_cast<int>((prev_goal_x_ + roi_size_/2)/map_resolution_));
-    int max_j_map = std::min(static_cast<int>(static_map_->info.height), static_cast<int>((prev_goal_y_ + roi_size_/2)/map_resolution_));
+      // Compute the direction and perpendicular vector for this waypoint pair
+      Eigen::Vector2f start(wx1, wy1);
+      Eigen::Vector2f end(wx2, wy2);
+      Eigen::Vector2f direction = end - start;
+      Eigen::Vector2f perpendicular(direction.y(), -direction.x());
+      perpendicular.normalize();
 
-    // Compute and update costs in the costmap
-    for (int j = min_j; j < max_j; ++j) {
-        for (int i = min_i; i < max_i; ++i) {
-          // get x, y coordinates of the cell
+      std::vector<Eigen::Vector2f> right_wall_points;
+      std::vector<Eigen::Vector2f> search_area;
+
+      // Determine the bounding box for this waypoint pair
+      int local_min_i = std::max(min_i, static_cast<int>(std::min(static_cast<int>(mx1), mx2))-margin_);
+      int local_min_j = std::max(min_j, static_cast<int>(std::min(static_cast<int>(my1), my2))-margin_);
+      int local_max_i = std::min(max_i, static_cast<int>(std::max(static_cast<int>(mx1), mx2))+margin_);
+      int local_max_j = std::min(max_j, static_cast<int>(std::max(static_cast<int>(my1), my2))+margin_);
+      
+      // Compute and update costs in the costmap for this waypoint pair
+      for (int j = local_min_j; j < local_max_j; ++j) {
+        for (int i = local_min_i; i < local_max_i; ++i) {
+          // Get the world coordinates of the current cell
           double wx, wy;
-          // get the world coordinates of the cell
           mapToWorld(static_cast<unsigned int>(i), static_cast<unsigned int>(j), wx, wy);
-          int wi = static_cast<int>(wx/map_resolution_);
-          int wj = static_cast<int>(wy/map_resolution_);
-          // check if the cell is out of bounds
-          if (wi < min_i_map || wi >= max_i_map || wj < min_j_map || wj >= max_j_map) {
-            continue;
-          }
-          
-          int index = wj * static_map_->info.width + wi;
-          int cost = static_cast<int>(static_map_->data[index]);
-          if (cost==-1){
-            continue;
-          }
-          // RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() i: %d, j: %d, wi: %d, wj: %d, wx: %f, wy: %f", i, j, wi, wj, wx, wy);
-          if(cost!=-1 && cost!=100) 
+          Eigen::Vector2f point(wx, wy);
+          // Check if the point lies between the previous and current waypoints
+          if ((point - start).dot(direction) >= 0 && (point - end).dot(direction) <= 0)
           {
-            search_area.push_back(Eigen::Vector2f(wx, wy));
-            space_file << wx<< "," << wy << "\n";
-          }
-          if(cost == 100) {
-            // check if right or left wall
-            // RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() Found wall at i: %d, j: %d", i, j);
-            Eigen::Vector2f wall_point(wx, wy);
-            Eigen::Vector2f point_to_wall = wall_point - robot_position;
-            float dot_product = point_to_wall.dot(perpendicular_direction);
-            if (dot_product > 0) {
-              right_wall_points.push_back(wall_point);
-              walls_file << prev_goal_x_ << "," << prev_goal_y_ << "," << goal_x_ << "," << goal_y_ << "," << wall_point.x() << "," << wall_point.y() << ",1\n";
-            } else {
-              left_wall_points.push_back(wall_point);
-              walls_file << prev_goal_x_ << "," << prev_goal_y_ << "," << goal_x_ << "," << goal_y_ << "," << wall_point.x() << "," << wall_point.y() << ",0\n";
+            // Check if the point is within the static map bounds
+            int wi = static_cast<int>(wx / map_resolution_);
+            int wj = static_cast<int>(wy / map_resolution_);
+            if (wi < 0 || wi >= static_cast<int>(static_map_->info.width) || 
+                wj < 0 || wj >= static_cast<int>(static_map_->info.height)) {
+              continue;
             }
-
+            int index = wj * static_map_->info.width + wi;
+            int cost_static_map = static_cast<int>(static_map_->data[index]);
+            // If the cell is in the free space, and is known, add it to the search area
+            if(cost_static_map!=-1 && cost_static_map!=100) 
+            {
+              search_area.push_back(Eigen::Vector2f(wx, wy));
+            }
+            // If the cell is a wall, check if it is a right wall point
+            else if(cost_static_map == 100) {
+              Eigen::Vector2f wall_point(wx, wy);
+              Eigen::Vector2f point_to_wall = wall_point - start;
+              float dot_product = point_to_wall.dot(perpendicular);
+              // If the dot product is positive, the point is a right wall point
+              if (dot_product > 0) {
+                right_wall_points.push_back(wall_point);
+              }
+            }
           }
-          else {
-            continue;
-          }
-
         }
-    }
-    walls_file.close();
-    space_file.close();
-    // RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() search_area size: %lu", search_area.size());
-    // RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() right_wall_points size: %lu", right_wall_points.size());
-    if (search_area.size() == 0 || right_wall_points.size() == 0) {
-      return;
-    }
-    std::vector<float> distances;
-    computeDistancesToWall(search_area, right_wall_points, distances);
-    
-    // Save distances to file
-    std::ofstream distance_file("/workspace/scripts/keep_right/distance_data" + std::to_string(num_files_) + ".csv");
-    if (!distance_file.is_open())
-    {
-        RCLCPP_ERROR(logger_, "Failed to open file for writing.");
+      }
+      if (search_area.size() == 0 || right_wall_points.size() == 0) {
         return;
+      }
+      std::vector<float> distances;
+      // Compute the distances for each cell in the search area to the right wall
+      computeDistancesToWall(search_area, right_wall_points, distances);    
     }
-    distance_file << "x,y,distance\n";
-    for (size_t i = 0; i < search_area.size(); i++) {
-      distance_file << search_area[i].x() << "," << search_area[i].y() << "," << distances[i] << "\n";
-    }
-    distance_file.close();
+    update_costmap_ = false;
   }
-  else{
-    num_files_ = 0;
-  }
-  
   updateWithAddition(master_grid, min_i, min_j, max_i, max_j);
-  // RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() finished");
-  // // Obtain max and min values in master_grid
-  // unsigned char* master_array = master_grid.getCharMap();
-  // unsigned char max_master_cost = 0;
-  // unsigned char min_master_cost = 255;
-  // for (int j = min_j; j < max_j; j++)
-  // {
-  //   for (int i = min_i; i < max_i; i++)
-  //   {
-  //     unsigned char cost = master_array[master_grid.getIndex(i, j)];
-  //     if (cost > max_master_cost)
-  //     {
-  //       max_master_cost = cost;
-  //     }
-  //     if (cost < min_master_cost)
-  //     {
-  //       min_master_cost = cost;
-  //     }
-  //   }
-  // }
-  // RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts(): min_master_cost: %d, max_master_cost: %d", min_master_cost, max_master_cost);
-
- 
-  // updateWithMax(master_grid, min_i, min_j, max_i, max_j);
-  
-  // // master_array - is a direct pointer to the resulting master_grid.
-  // // master_grid - is a resulting costmap combined from all layers.
-  // // By using this pointer all layers will be overwritten!
-  // // To work with costmap layer and merge it with other costmap layers,
-  // // please use costmap_ pointer instead (this is pointer to current
-  // // costmap layer grid) and then call one of updates methods:
-  // // - updateWithAddition()
-  // // - updateWithMax()
-  // // - updateWithOverwrite()
-  // // - updateWithTrueOverwrite()
-  // // In this case using master_array pointer is equal to modifying local costmap_
-  // // pointer and then calling updateWithTrueOverwrite():
-  // unsigned char * master_array = master_grid.getCharMap();
-  // unsigned int size_x = master_grid.getSizeInCellsX(), size_y = master_grid.getSizeInCellsY();
-
-  // // {min_i, min_j} - {max_i, max_j} - are update-window coordinates.
-  // // These variables are used to update the costmap only within this window
-  // // avoiding the updates of whole area.
-  // //
-  // // Fixing window coordinates with map size if necessary.
-  // min_i = std::max(0, min_i);
-  // min_j = std::max(0, min_j);
-  // max_i = std::min(static_cast<int>(size_x), max_i);
-  // max_j = std::min(static_cast<int>(size_y), max_j);
-
-  // // Simply computing one-by-one cost per each cell
-  // int gradient_index;
-  // for (int j = min_j; j < max_j; j++) {
-  //   // Reset gradient_index each time when reaching the end of re-calculated window
-  //   // by OY axis.
-  //   gradient_index = 0;
-  //   for (int i = min_i; i < max_i; i++) {
-  //     int index = master_grid.getIndex(i, j);
-  //     // setting the gradient cost
-  //     unsigned char cost = (LETHAL_OBSTACLE - gradient_index*GRADIENT_FACTOR)%255;
-  //     if (gradient_index <= GRADIENT_SIZE) {
-  //       gradient_index++;
-  //     } else {
-  //       gradient_index = 0;
-  //     }
-  //     master_array[index] = cost;
-  //   }
-  // }
-  
 }
 
-// The method is called when footprint was changed.
-// Here it just resets need_recalculation_ variable.
 void
 RightWallCostmapLayer::onFootprintChanged()
 {
-  need_recalculation_ = true;
 
   RCLCPP_WARN(rclcpp::get_logger(
       "nav2_costmap_2d"), "GradientLayer::onFootprintChanged(): num footprint points: %lu",
     layered_costmap_->getFootprint().size());
 }
 
-
-
 }  // namespace nav2_costmap_2d
 
-// This is the macro allowing a nav2_gradient_costmap_plugin::GradientLayer class
+// This is the macro allowing a nav2_costmap_2d::RightWallCostmapLayer class
 // to be registered in order to be dynamically loadable of base type nav2_costmap_2d::Layer.
 // Usually places in the end of cpp-file where the loadable class written.
 #include "pluginlib/class_list_macros.hpp"
