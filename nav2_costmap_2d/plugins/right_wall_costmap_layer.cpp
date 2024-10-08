@@ -143,7 +143,7 @@ unsigned char RightWallCostmapLayer::computeCost(float distance)
 {
     if (distance > max_distance_)
     {
-        return static_cast<unsigned char>(min_cost_);
+        return static_cast<unsigned char>(max_cost_);
     }
     else
     {
@@ -277,6 +277,8 @@ void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid,
 
   if(update_costmap_) 
   {
+    std::vector<Eigen::Vector2f> right_wall_points;
+    std::vector<Eigen::Vector2f> search_area;
     RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() path_index_: %d, size: %zu", path_index_, global_path_->poses.size());
     // Iterate through waypoint pairs in the global path
     for (size_t idx = path_index_; idx < global_path_->poses.size() - 1; ++idx)
@@ -304,8 +306,7 @@ void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid,
       Eigen::Vector2f perpendicular(direction.y(), -direction.x());
       perpendicular.normalize();
 
-      std::vector<Eigen::Vector2f> right_wall_points;
-      std::vector<Eigen::Vector2f> search_area;
+      
 
       // Determine the bounding box for this waypoint pair
       int local_min_i = std::max(min_i, static_cast<int>(std::min(static_cast<int>(mx1), mx2))-margin_);
@@ -320,8 +321,11 @@ void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid,
           double wx, wy;
           mapToWorld(static_cast<unsigned int>(i), static_cast<unsigned int>(j), wx, wy);
           Eigen::Vector2f point(wx, wy);
+          // Extend the line from start to end by a distance
+          Eigen::Vector2f extended_start = start - direction.normalized() * 2.0;
+          Eigen::Vector2f extended_end = end + direction.normalized() * 2.0;
           // Check if the point lies between the previous and current waypoints
-          if ((point - start).dot(direction) >= 0 && (point - end).dot(direction) <= 0)
+          if ((point - extended_start).dot(direction) >= 0 && (point - extended_end).dot(direction) <= 0)
           {
             // Check if the point is within the static map bounds
             int wi = static_cast<int>(wx / map_resolution_);
@@ -353,10 +357,11 @@ void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid,
       if (search_area.size() == 0 || right_wall_points.size() == 0) {
         return;
       }
-      std::vector<float> distances;
-      // Compute the distances for each cell in the search area to the right wall
-      computeDistancesToWall(search_area, right_wall_points, distances);    
     }
+    // Compute the distances for each cell in the search area to the right wall
+    std::vector<float> distances;
+    computeDistancesToWall(search_area, right_wall_points, distances);    
+
     update_costmap_ = false;
   }
   updateWithAddition(master_grid, min_i, min_j, max_i, max_j);
