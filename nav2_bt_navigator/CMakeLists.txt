@@ -19,6 +19,18 @@ find_package(nav2_core REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(pluginlib REQUIRED)
 
+include(FetchContent)
+
+FetchContent_Declare(Backward    #Note: For some reason I ran into issues when the target here is called backwards with a small b at the beginning
+    GIT_REPOSITORY https://github.com/bombela/backward-cpp
+    GIT_TAG master  # or a version tag, such as v1.6
+ 
+)
+FetchContent_MakeAvailable(Backward)
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(BACKWARD_ENABLE_SHARED ON)
+
 nav2_package()
 
 include_directories(
@@ -30,6 +42,8 @@ set(executable_name bt_navigator)
 add_executable(${executable_name}
   src/main.cpp
 )
+
+target_link_libraries(${executable_name} backward_object)
 
 set(library_name ${executable_name}_core)
 

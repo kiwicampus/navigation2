@@ -15,6 +15,18 @@ find_package(nav_2d_utils REQUIRED)
 find_package(nav_2d_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
 
+include(FetchContent)
+
+FetchContent_Declare(Backward    #Note: For some reason I ran into issues when the target here is called backwards with a small b at the beginning
+    GIT_REPOSITORY https://github.com/bombela/backward-cpp
+    GIT_TAG master  # or a version tag, such as v1.6
+ 
+)
+FetchContent_MakeAvailable(Backward)
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(BACKWARD_ENABLE_SHARED ON)
+
 nav2_package()
 
 include_directories(
@@ -80,6 +92,7 @@ ament_target_dependencies(${executable_name}
 )
 
 target_link_libraries(${executable_name} ${library_name})
+target_link_libraries(${executable_name} backward_object)
 
 rclcpp_components_register_nodes(${library_name} "nav2_controller::ControllerServer")
 
