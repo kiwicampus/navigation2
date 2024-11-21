@@ -92,6 +92,7 @@ add_library(layers SHARED
   plugins/range_sensor_layer.cpp
   plugins/denoise_layer.cpp
   plugins/semantic_segmentation_layer.cpp
+  plugins/right_wall_costmap_layer.cpp
 )
 add_library(${PROJECT_NAME}::layers ALIAS layers)
 ament_target_dependencies(layers
