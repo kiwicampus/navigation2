@@ -1,4 +1,4 @@
-#include "nav2_costmap_2d/right_wall_costmap_layer.hpp"
+#include "nav2_costmap_2d/lane_keeping_costmap_layer.hpp"
 #include "nav2_costmap_2d/costmap_math.hpp"
 #include <algorithm>
 #include <vector>
@@ -10,7 +10,7 @@
 namespace nav2_costmap_2d
 {
 
-RightWallCostmapLayer::RightWallCostmapLayer()
+LaneKeepingLayer::LaneKeepingLayer()
 : last_min_x_(-std::numeric_limits<float>::max()),
 last_min_y_(-std::numeric_limits<float>::max()),
 last_max_x_(std::numeric_limits<float>::max()),
@@ -18,11 +18,11 @@ last_max_y_(std::numeric_limits<float>::max())
 {
 }
 
-RightWallCostmapLayer::~RightWallCostmapLayer()
+LaneKeepingLayer::~LaneKeepingLayer()
 {
 }
 
-void RightWallCostmapLayer::onInitialize()
+void LaneKeepingLayer::onInitialize()
 {
   current_ = true;
   was_reset_ = false;
@@ -46,15 +46,15 @@ void RightWallCostmapLayer::onInitialize()
   // Set up subscriptions
   odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
     global_odom_topic_, rclcpp::SensorDataQoS(),
-    std::bind(&RightWallCostmapLayer::odomCallback, this, std::placeholders::_1));
+    std::bind(&LaneKeepingLayer::odomCallback, this, std::placeholders::_1));
 
   path_sub_ = node->create_subscription<nav_msgs::msg::Path>(
     global_path_topic_, rclcpp::SystemDefaultsQoS(),
-    std::bind(&RightWallCostmapLayer::pathCallback, this, std::placeholders::_1));
+    std::bind(&LaneKeepingLayer::pathCallback, this, std::placeholders::_1));
 
   map_sub_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
     map_topic_, rclcpp::QoS(10).transient_local().reliable().keep_last(1),
-    std::bind(&RightWallCostmapLayer::mapCallback, this, std::placeholders::_1));
+    std::bind(&LaneKeepingLayer::mapCallback, this, std::placeholders::_1));
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
   rolling_window_ = layered_costmap_->isRolling();
@@ -63,27 +63,27 @@ void RightWallCostmapLayer::onInitialize()
   matchSize();
   dyn_params_handler_ = node->add_on_set_parameters_callback(
     std::bind(
-      &RightWallCostmapLayer::dynamicParametersCallback,
+      &LaneKeepingLayer::dynamicParametersCallback,
       this,
       std::placeholders::_1));
 
 
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::onInitialize() - Initialized");
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::onInitialize() - Initialized");
 
 }
 
 void
-RightWallCostmapLayer::activate()
+LaneKeepingLayer::activate()
 {
 }
 
 void
-RightWallCostmapLayer::deactivate()
+LaneKeepingLayer::deactivate()
 {
   auto node = node_.lock();
 }
 
-void RightWallCostmapLayer::reset()
+void LaneKeepingLayer::reset()
 {
   // return;
   resetMaps();
@@ -91,7 +91,7 @@ void RightWallCostmapLayer::reset()
   was_reset_ = true;
 }
 
-void RightWallCostmapLayer::getParameters()
+void LaneKeepingLayer::getParameters()
 {
   auto node = node_.lock();
   node->get_parameter(name_ + "." + "enabled", enabled_);
@@ -105,17 +105,17 @@ void RightWallCostmapLayer::getParameters()
   node->get_parameter(name_ + "." + "map_resolution", map_resolution_);
 
   // Print parameters
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - keep_right: %s", keep_right_ ? "true" : "false");
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - max_distance: %f", max_distance_);
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - max_cost: %f", max_cost_);
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - min_cost: %f", min_cost_);
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - map_topic: %s", map_topic_.c_str());
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - global_path_topic: %s", global_path_topic_.c_str());
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - global_odom_topic: %s", global_odom_topic_.c_str());
-  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - map_resolution: %f", map_resolution_);
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - keep_right: %s", keep_right_ ? "true" : "false");
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - max_distance: %f", max_distance_);
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - max_cost: %f", max_cost_);
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - min_cost: %f", min_cost_);
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - map_topic: %s", map_topic_.c_str());
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - global_path_topic: %s", global_path_topic_.c_str());
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - global_odom_topic: %s", global_odom_topic_.c_str());
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - map_resolution: %f", map_resolution_);
 }
 
-rcl_interfaces::msg::SetParametersResult RightWallCostmapLayer::dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters)
+rcl_interfaces::msg::SetParametersResult LaneKeepingLayer::dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters)
 {
   std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
   auto result = rcl_interfaces::msg::SetParametersResult();
@@ -124,22 +124,22 @@ rcl_interfaces::msg::SetParametersResult RightWallCostmapLayer::dynamicParameter
     const auto & name = parameter.get_name();
     if (type == rclcpp::ParameterType::PARAMETER_BOOL) {
       if (name == name_ + "." + "enabled") {
-        RCLCPP_WARN(logger_, "RightWallCostmapLayer::dynamicParametersCallback() - enabled: %s", parameter.as_bool() ? "true" : "false");
+        RCLCPP_WARN(logger_, "LaneKeepingLayer::dynamicParametersCallback() - enabled: %s", parameter.as_bool() ? "true" : "false");
         enabled_ = parameter.as_bool();
       }
     }
     if (type == rclcpp::ParameterType::PARAMETER_DOUBLE) {
       if (name == name_ + "." + "max_distance") {
         max_distance_ = parameter.as_double();
-        RCLCPP_INFO(logger_, "RightWallCostmapLayer::dynamicParametersCallback() - max_distance: %f", max_distance_);
+        RCLCPP_INFO(logger_, "LaneKeepingLayer::dynamicParametersCallback() - max_distance: %f", max_distance_);
       }
       if (name == name_ + "." + "max_cost") {
         max_cost_ = parameter.as_double();
-        RCLCPP_INFO(logger_, "RightWallCostmapLayer::dynamicParametersCallback() - max_cost: %f", max_cost_);
+        RCLCPP_INFO(logger_, "LaneKeepingLayer::dynamicParametersCallback() - max_cost: %f", max_cost_);
       }
       if (name == name_ + "." + "min_cost") {
         min_cost_ = parameter.as_double();
-        RCLCPP_INFO(logger_, "RightWallCostmapLayer::dynamicParametersCallback() - min_cost: %f", min_cost_);
+        RCLCPP_INFO(logger_, "LaneKeepingLayer::dynamicParametersCallback() - min_cost: %f", min_cost_);
       }
       if (name == name_ + "." + "map_resolution") {
         map_resolution_ = parameter.as_double();
@@ -151,7 +151,7 @@ rcl_interfaces::msg::SetParametersResult RightWallCostmapLayer::dynamicParameter
   return result;
 }
 
-void RightWallCostmapLayer::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+void LaneKeepingLayer::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
 {
   std::lock_guard<std::mutex> guard(data_mutex_);
   robot_pose_.header = msg->header;
@@ -160,13 +160,13 @@ void RightWallCostmapLayer::odomCallback(const nav_msgs::msg::Odometry::SharedPt
   robot_y_ = robot_pose_.pose.position.y;
 }
 
-void RightWallCostmapLayer::pathCallback(const nav_msgs::msg::Path::SharedPtr msg)
+void LaneKeepingLayer::pathCallback(const nav_msgs::msg::Path::SharedPtr msg)
 {
   std::lock_guard<std::mutex> guard(data_mutex_);
   global_path_ = msg;
   path_index_ = 0;
   if(static_cast<int>(global_path_->poses.size()) < 2) {
-    RCLCPP_WARN(logger_, "RightWallCostmapLayer::pathCallback() path_index_ is out of bounds");
+    RCLCPP_WARN(logger_, "LaneKeepingLayer::pathCallback() path_index_ is out of bounds");
     prev_goal_x_ = 0.0;
     prev_goal_y_ = 0.0;
     goal_x_ = 0.0;
@@ -179,14 +179,14 @@ void RightWallCostmapLayer::pathCallback(const nav_msgs::msg::Path::SharedPtr ms
   goal_y_ = global_path_->poses[path_index_+1].pose.position.y;
 }
 
-void RightWallCostmapLayer::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
+void LaneKeepingLayer::mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg)
 {
   std::lock_guard<std::mutex> guard(data_mutex_);
   static_map_ = msg;
 }
 
 
-unsigned char RightWallCostmapLayer::computeCost(float distance)
+unsigned char LaneKeepingLayer::computeCost(float distance)
 {
     if (distance > max_distance_)
     {
@@ -200,7 +200,7 @@ unsigned char RightWallCostmapLayer::computeCost(float distance)
 }
 
 
-void RightWallCostmapLayer::setCost(unsigned int mx, unsigned int my, unsigned char cost)
+void LaneKeepingLayer::setCost(unsigned int mx, unsigned int my, unsigned char cost)
 {
     // Check bounds and set cost
     if (mx < getSizeInCellsX() && my < getSizeInCellsY())
@@ -211,7 +211,7 @@ void RightWallCostmapLayer::setCost(unsigned int mx, unsigned int my, unsigned c
 
 }
 
-void RightWallCostmapLayer::computeDistancesToWall(
+void LaneKeepingLayer::computeDistancesToWall(
     const std::vector<Eigen::Vector2f>& search_area,
     const std::vector<Eigen::Vector2f>& wall_points,
     std::vector<float>& distances)
@@ -257,11 +257,11 @@ void RightWallCostmapLayer::computeDistancesToWall(
     }
 }
 
-void RightWallCostmapLayer::updateBounds(double robot_x, double robot_y, double /*robot_yaw*/,
+void LaneKeepingLayer::updateBounds(double robot_x, double robot_y, double /*robot_yaw*/,
                                              double* min_x, double* min_y, double* max_x,
                                              double* max_y)
 {
-  // RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateBounds()");
+  // RCLCPP_WARN(logger_, "LaneKeepingLayer::updateBounds()");
   std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
 
   if (!enabled_)
@@ -289,7 +289,7 @@ void RightWallCostmapLayer::updateBounds(double robot_x, double robot_y, double 
   current_ = true;
 }
 
-void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int min_i,
+void LaneKeepingLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int min_i,
                                             int min_j, int max_i, int max_j)
 {
   std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
@@ -299,13 +299,13 @@ void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid,
   }
   if (!current_ && was_reset_)
   {
-    RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() called but not current and was reset");
+    RCLCPP_WARN(logger_, "LaneKeepingLayer::updateCosts() called but not current and was reset");
     was_reset_ = false;
     current_ = true;
   }
   if(global_path_ == nullptr || global_path_->poses.size() < 2)
   {
-    RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() global_path_ is null or has less than 2 poses");
+    RCLCPP_WARN(logger_, "LaneKeepingLayer::updateCosts() global_path_ is null or has less than 2 poses");
     return;
   }
 
@@ -339,7 +339,7 @@ void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid,
       if (!worldToMap(wx1, wy1, mx1, my1))
       {
         continue;
-        RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() - first point out of bounds");
+        RCLCPP_WARN(logger_, "LaneKeepingLayer::updateCosts() - first point out of bounds");
       }
       int mx2, my2;
       worldToMapNoBounds(wx2, wy2, mx2, my2);
@@ -418,7 +418,7 @@ void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid,
 }
 
 void
-RightWallCostmapLayer::onFootprintChanged()
+LaneKeepingLayer::onFootprintChanged()
 {
 
   RCLCPP_WARN(rclcpp::get_logger(
@@ -428,8 +428,8 @@ RightWallCostmapLayer::onFootprintChanged()
 
 }  // namespace nav2_costmap_2d
 
-// This is the macro allowing a nav2_costmap_2d::RightWallCostmapLayer class
+// This is the macro allowing a nav2_costmap_2d::LaneKeepingLayer class
 // to be registered in order to be dynamically loadable of base type nav2_costmap_2d::Layer.
 // Usually places in the end of cpp-file where the loadable class written.
 #include "pluginlib/class_list_macros.hpp"
-PLUGINLIB_EXPORT_CLASS(nav2_costmap_2d::RightWallCostmapLayer, nav2_costmap_2d::Layer)
+PLUGINLIB_EXPORT_CLASS(nav2_costmap_2d::LaneKeepingLayer, nav2_costmap_2d::Layer)

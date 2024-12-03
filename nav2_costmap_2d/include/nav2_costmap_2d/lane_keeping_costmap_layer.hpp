@@ -1,5 +1,5 @@
-#ifndef RIGHT_WALL_COSTMAP_LAYER_HPP_
-#define RIGHT_WALL_COSTMAP_LAYER_HPP_
+#ifndef LANE_KEEPING_COSTMAP_LAYER_HPP_
+#define LANE_KEEPING_COSTMAP_LAYER_HPP_
 
 #include "nav2_costmap_2d/layer.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
@@ -43,7 +43,7 @@ struct Wall
 };
 
 /**
- * @brief RightWallCostmapLayer class
+ * @brief LaneKeepingLayer class
  * @details Class that implements the right wall costmap layer
  * The layer is used to create a costmap based on the distance to the right wall
  * Most of the layer logic is implemented in the updateCosts method, which is called at each iteration
@@ -51,11 +51,11 @@ struct Wall
  * It uses the nanoflann library to perform kd-tree searches and find the nearest wall point for each cell in the free space.
  * We compute the cost for eachcell based on the computeCost method
  */
-class RightWallCostmapLayer : public CostmapLayer
+class LaneKeepingLayer : public CostmapLayer
 {
 public:
-  RightWallCostmapLayer();
-  virtual ~RightWallCostmapLayer();
+  LaneKeepingLayer();
+  virtual ~LaneKeepingLayer();
 
   virtual void onInitialize();
   /**
@@ -161,4 +161,4 @@ private:
 
 }  // namespace nav2_costmap_2d
 
-#endif  // RIGHT_WALL_COSTMAP_LAYER_HPP_
+#endif  // LANE_KEEPING_COSTMAP_LAYER_HPP_
