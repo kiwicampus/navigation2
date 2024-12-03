@@ -146,6 +146,7 @@ private:
   double max_distance_;        // Maximum distance from the right wall in meters
   double max_cost_, min_cost_, map_resolution_;
   bool rolling_window_;
+  bool keep_right_;
   std::string map_topic_;
   std::string global_path_topic_;
   std::string global_odom_topic_;

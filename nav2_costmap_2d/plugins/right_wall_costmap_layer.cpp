@@ -31,6 +31,7 @@ void RightWallCostmapLayer::onInitialize()
     throw std::runtime_error{"Failed to lock node"};
   }
   declareParameter("enabled", rclcpp::ParameterValue(true));
+  declareParameter("keep_right", rclcpp::ParameterValue(true));
   declareParameter("max_distance", rclcpp::ParameterValue(5.0));       // in meters
   declareParameter("max_cost", rclcpp::ParameterValue(150.0));
   declareParameter("min_cost", rclcpp::ParameterValue(0.0));
@@ -94,6 +95,7 @@ void RightWallCostmapLayer::getParameters()
 {
   auto node = node_.lock();
   node->get_parameter(name_ + "." + "enabled", enabled_);
+  node->get_parameter(name_ + "." + "keep_right", keep_right_);
   node->get_parameter(name_ + "." + "max_distance", max_distance_);
   node->get_parameter(name_ + "." + "max_cost", max_cost_);
   node->get_parameter(name_ + "." + "min_cost", min_cost_);
@@ -103,6 +105,7 @@ void RightWallCostmapLayer::getParameters()
   node->get_parameter(name_ + "." + "map_resolution", map_resolution_);
 
   // Print parameters
+  RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - keep_right: %s", keep_right_ ? "true" : "false");
   RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - max_distance: %f", max_distance_);
   RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - max_cost: %f", max_cost_);
   RCLCPP_INFO(logger_, "RightWallCostmapLayer::getParameters() - min_cost: %f", min_cost_);
@@ -119,10 +122,9 @@ rcl_interfaces::msg::SetParametersResult RightWallCostmapLayer::dynamicParameter
   for (auto parameter : parameters) {
     const auto & type = parameter.get_type();
     const auto & name = parameter.get_name();
-    RCLCPP_WARN(logger_, "RightWallCostmapLayer::dynamicParametersCallback() - name: %s, type: %d", name.c_str(), static_cast<int>(type));
-    RCLCPP_WARN(logger_, "RightWallCostmapLayer::dynamicParametersCallback() - name_: %s", name_.c_str());
     if (type == rclcpp::ParameterType::PARAMETER_BOOL) {
       if (name == name_ + "." + "enabled") {
+        RCLCPP_WARN(logger_, "RightWallCostmapLayer::dynamicParametersCallback() - enabled: %s", parameter.as_bool() ? "true" : "false");
         enabled_ = parameter.as_bool();
       }
     }
@@ -293,7 +295,6 @@ void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid,
   std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
   if (!enabled_)
   {
-    RCLCPP_WARN(logger_, "RightWallCostmapLayer::updateCosts() called but not enabled");
     return;
   }
   if (!current_ && was_reset_)
@@ -389,8 +390,15 @@ void RightWallCostmapLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid,
               Eigen::Vector2f point_to_wall = wall_point - start;
               float dot_product = point_to_wall.dot(perpendicular);
               // If the dot product is positive, the point is a right wall point
-              if (dot_product > 0) {
-                right_wall_points.push_back(wall_point);
+              if (keep_right_) {
+                if (dot_product > 0) {
+                  right_wall_points.push_back(wall_point);
+                }
+              }
+              else {
+                if (dot_product < 0) {
+                  right_wall_points.push_back(wall_point);
+                }
               }
             }
           }
