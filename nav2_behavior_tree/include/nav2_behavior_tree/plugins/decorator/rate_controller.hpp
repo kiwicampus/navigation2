@@ -65,6 +65,7 @@ private:
   double period_;
   bool first_time_;
   bool initialized_;
+  rclcpp::Node::SharedPtr node_;
 };
 
 }  // namespace nav2_behavior_tree
