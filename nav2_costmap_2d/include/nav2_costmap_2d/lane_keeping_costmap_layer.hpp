@@ -10,6 +10,10 @@
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "sensor_msgs/msg/image.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
+#include <tf2_ros/buffer.h>
+#include <tf2_ros/transform_broadcaster.h>
+#include <tf2_ros/transform_listener.h>
+#include "tf2_ros/create_timer_ros.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "Eigen/Core"
 #include "Eigen/Dense"
@@ -95,7 +99,6 @@ public:
   virtual void deactivate();
 
 private:
-  void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
   void pathCallback(const nav_msgs::msg::Path::SharedPtr msg);
   void mapCallback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg);
   void getParameters();
@@ -137,6 +140,10 @@ private:
   nav_msgs::msg::Path::SharedPtr global_path_;
   geometry_msgs::msg::PoseStamped robot_pose_;
   nav_msgs::msg::OccupancyGrid::SharedPtr static_map_;
+  std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+
   double robot_x_, robot_y_;
   double prev_goal_x_, prev_goal_y_, goal_x_, goal_y_;
   bool was_reset_;
@@ -153,16 +160,17 @@ private:
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
 
   double max_distance_;        // Maximum distance from the right wall in meters
-  double max_cost_, min_cost_, map_resolution_, distance_to_center_;
+  double max_cost_, min_cost_, map_resolution_, distance_to_center_, next_goal_distance_;
   double shift_distance_;
   bool rolling_window_;
   bool keep_right_;
+  int combination_method_;
   std::string map_topic_;
   std::string global_path_topic_;
-  std::string global_odom_topic_;
   std::string global_frame_;
   std::string mode_; // "edge_distance" or "center_distance"
-
+  std::string robot_frame_;
+  std::string world_frame_;
   // Costmap buffer
   nav2_costmap_2d::Costmap2D costmap_buffer_;
 

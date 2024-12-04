@@ -37,19 +37,17 @@ void LaneKeepingLayer::onInitialize()
   declareParameter("distance_to_center", rclcpp::ParameterValue(1.0));   // in meters
   declareParameter("max_cost", rclcpp::ParameterValue(150.0));
   declareParameter("min_cost", rclcpp::ParameterValue(0.0));
+  declareParameter("next_goal_distance", rclcpp::ParameterValue(6.0));
+  declareParameter("combination_method", rclcpp::ParameterValue(2));
   declareParameter("map_topic", rclcpp::ParameterValue("/map"));
+  declareParameter("world_frame", rclcpp::ParameterValue("map"));
+  declareParameter("robot_frame", rclcpp::ParameterValue("base_link"));
   declareParameter("global_path_topic", rclcpp::ParameterValue("/nav2/cartesian_geopath"));
-  declareParameter("global_odom_topic", rclcpp::ParameterValue("/odometry/global"));
   declareParameter("map_resolution", rclcpp::ParameterValue(0.1));
   getParameters();
   margin_ = static_cast<int>(10.0 / map_resolution_); // 10 meters of margin
 
-
   // Set up subscriptions
-  odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
-    global_odom_topic_, rclcpp::SensorDataQoS(),
-    std::bind(&LaneKeepingLayer::odomCallback, this, std::placeholders::_1));
-
   path_sub_ = node->create_subscription<nav_msgs::msg::Path>(
     global_path_topic_, rclcpp::SystemDefaultsQoS(),
     std::bind(&LaneKeepingLayer::pathCallback, this, std::placeholders::_1));
@@ -57,6 +55,17 @@ void LaneKeepingLayer::onInitialize()
   map_sub_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
     map_topic_, rclcpp::QoS(10).transient_local().reliable().keep_last(1),
     std::bind(&LaneKeepingLayer::mapCallback, this, std::placeholders::_1));
+
+  // TF stuff node is LifecycleNode
+  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
+    node->get_node_base_interface(),
+    node->get_node_timers_interface(),
+    callback_group_);
+  tf_buffer_->setCreateTimerInterface(timer_interface);
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);          
+
+
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
   rolling_window_ = layered_costmap_->isRolling();
@@ -103,9 +112,12 @@ void LaneKeepingLayer::getParameters()
   node->get_parameter(name_ + "." + "distance_to_center", distance_to_center_);
   node->get_parameter(name_ + "." + "max_cost", max_cost_);
   node->get_parameter(name_ + "." + "min_cost", min_cost_);
+  node->get_parameter(name_ + "." + "next_goal_distance", next_goal_distance_);
+  node->get_parameter(name_ + "." + "combination_method", combination_method_);
   node->get_parameter(name_ + "." + "map_topic", map_topic_);
+  node->get_parameter(name_ + "." + "world_frame", world_frame_);
+  node->get_parameter(name_ + "." + "robot_frame", robot_frame_);
   node->get_parameter(name_ + "." + "global_path_topic", global_path_topic_);
-  node->get_parameter(name_ + "." + "global_odom_topic", global_odom_topic_);
   node->get_parameter(name_ + "." + "map_resolution", map_resolution_);
 
   // Print parameters
@@ -115,9 +127,12 @@ void LaneKeepingLayer::getParameters()
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - distance_to_center: %f", distance_to_center_);
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - max_cost: %f", max_cost_);
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - min_cost: %f", min_cost_);
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - next_goal_distance: %f", next_goal_distance_);
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - combination_method: %d", combination_method_);
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - map_topic: %s", map_topic_.c_str());
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - world_frame: %s", world_frame_.c_str());
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - robot_frame: %s", robot_frame_.c_str());
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - global_path_topic: %s", global_path_topic_.c_str());
-  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - global_odom_topic: %s", global_odom_topic_.c_str());
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - map_resolution: %f", map_resolution_);
 }
 
@@ -151,8 +166,18 @@ rcl_interfaces::msg::SetParametersResult LaneKeepingLayer::dynamicParametersCall
         min_cost_ = parameter.as_double();
         RCLCPP_INFO(logger_, "LaneKeepingLayer::dynamicParametersCallback() - min_cost: %f", min_cost_);
       }
+      if (name == name_ + "." + "next_goal_distance") {
+        next_goal_distance_ = parameter.as_double();
+        RCLCPP_INFO(logger_, "LaneKeepingLayer::dynamicParametersCallback() - next_goal_distance: %f", next_goal_distance_);
+      }
       if (name == name_ + "." + "map_resolution") {
         map_resolution_ = parameter.as_double();
+      }
+    }
+    if (type == rclcpp::ParameterType::PARAMETER_INTEGER) {
+      if (name == name_ + "." + "combination_method") {
+        combination_method_ = parameter.as_int();
+        RCLCPP_INFO(logger_, "LaneKeepingLayer::dynamicParametersCallback() - combination_method: %d", combination_method_);
       }
     }
     if (type == rclcpp::ParameterType::PARAMETER_STRING) {
@@ -165,15 +190,6 @@ rcl_interfaces::msg::SetParametersResult LaneKeepingLayer::dynamicParametersCall
   }
   result.successful = true;
   return result;
-}
-
-void LaneKeepingLayer::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
-{
-  std::lock_guard<std::mutex> guard(data_mutex_);
-  robot_pose_.header = msg->header;
-  robot_pose_.pose = msg->pose.pose;
-  robot_x_ = robot_pose_.pose.position.x;
-  robot_y_ = robot_pose_.pose.position.y;
 }
 
 void LaneKeepingLayer::pathCallback(const nav_msgs::msg::Path::SharedPtr msg)
@@ -412,10 +428,22 @@ void LaneKeepingLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int 
     RCLCPP_WARN(logger_, "LaneKeepingLayer::updateCosts() static_map_ is null: no static map has been received");
     return;
   }
+  // Update robot's pose using TF
+  try{
+    geometry_msgs::msg::TransformStamped transform;
+    transform = tf_buffer_->lookupTransform(world_frame_, robot_frame_, tf2::TimePointZero);
+    robot_x_ = transform.transform.translation.x;
+    robot_y_ = transform.transform.translation.y;
+  }
+  catch(const tf2::TransformException& ex)
+  {
+    RCLCPP_ERROR(logger_, "LaneKeepingLayer::updateCosts() - %s", ex.what());
+    return;
+  }
 
   // Check if the robot has reached the goal point and update the path index
   double distance_to_goal = distance(robot_x_, robot_y_, goal_x_, goal_y_);
-  if(distance_to_goal < 6.0) {
+  if(distance_to_goal < next_goal_distance_) {
     path_index_++;
     update_costmap_ = true;
   }
@@ -535,7 +563,20 @@ void LaneKeepingLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int 
 
     update_costmap_ = false;
   }
-  updateWithAddition(master_grid, min_i, min_j, max_i, max_j);
+  switch (combination_method_) {
+    case 0:  // Overwrite
+      updateWithOverwrite(master_grid, min_i, min_j, max_i, max_j);
+      break;
+    case 1:  // Maximum
+      updateWithMax(master_grid, min_i, min_j, max_i, max_j);
+      break;
+    case 2:  // Addition
+      updateWithAddition(master_grid, min_i, min_j, max_i, max_j);
+      break;
+    default:  // Default: Addition
+      updateWithAddition(master_grid, min_i, min_j, max_i, max_j);
+      break;
+  }
 }
 
 
