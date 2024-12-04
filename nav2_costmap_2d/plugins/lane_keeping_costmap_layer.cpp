@@ -31,8 +31,10 @@ void LaneKeepingLayer::onInitialize()
     throw std::runtime_error{"Failed to lock node"};
   }
   declareParameter("enabled", rclcpp::ParameterValue(true));
+  declareParameter("mode", rclcpp::ParameterValue("edge_distance"));
   declareParameter("keep_right", rclcpp::ParameterValue(true));
   declareParameter("max_distance", rclcpp::ParameterValue(5.0));       // in meters
+  declareParameter("distance_to_center", rclcpp::ParameterValue(1.0));   // in meters
   declareParameter("max_cost", rclcpp::ParameterValue(150.0));
   declareParameter("min_cost", rclcpp::ParameterValue(0.0));
   declareParameter("map_topic", rclcpp::ParameterValue("/map"));
@@ -95,8 +97,10 @@ void LaneKeepingLayer::getParameters()
 {
   auto node = node_.lock();
   node->get_parameter(name_ + "." + "enabled", enabled_);
+  node->get_parameter(name_ + "." + "mode", mode_);
   node->get_parameter(name_ + "." + "keep_right", keep_right_);
   node->get_parameter(name_ + "." + "max_distance", max_distance_);
+  node->get_parameter(name_ + "." + "distance_to_center", distance_to_center_);
   node->get_parameter(name_ + "." + "max_cost", max_cost_);
   node->get_parameter(name_ + "." + "min_cost", min_cost_);
   node->get_parameter(name_ + "." + "map_topic", map_topic_);
@@ -105,8 +109,10 @@ void LaneKeepingLayer::getParameters()
   node->get_parameter(name_ + "." + "map_resolution", map_resolution_);
 
   // Print parameters
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - mode: %s", mode_.c_str());
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - keep_right: %s", keep_right_ ? "true" : "false");
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - max_distance: %f", max_distance_);
+  RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - distance_to_center: %f", distance_to_center_);
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - max_cost: %f", max_cost_);
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - min_cost: %f", min_cost_);
   RCLCPP_INFO(logger_, "LaneKeepingLayer::getParameters() - map_topic: %s", map_topic_.c_str());
@@ -133,6 +139,10 @@ rcl_interfaces::msg::SetParametersResult LaneKeepingLayer::dynamicParametersCall
         max_distance_ = parameter.as_double();
         RCLCPP_INFO(logger_, "LaneKeepingLayer::dynamicParametersCallback() - max_distance: %f", max_distance_);
       }
+      if (name == name_ + "." + "distance_to_center") {
+        distance_to_center_ = parameter.as_double();
+        RCLCPP_INFO(logger_, "LaneKeepingLayer::dynamicParametersCallback() - distance_to_center: %f", distance_to_center_);
+      }
       if (name == name_ + "." + "max_cost") {
         max_cost_ = parameter.as_double();
         RCLCPP_INFO(logger_, "LaneKeepingLayer::dynamicParametersCallback() - max_cost: %f", max_cost_);
@@ -143,6 +153,12 @@ rcl_interfaces::msg::SetParametersResult LaneKeepingLayer::dynamicParametersCall
       }
       if (name == name_ + "." + "map_resolution") {
         map_resolution_ = parameter.as_double();
+      }
+    }
+    if (type == rclcpp::ParameterType::PARAMETER_STRING) {
+      if (name == name_ + "." + "mode") {
+        mode_ = parameter.as_string();
+        RCLCPP_INFO(logger_, "LaneKeepingLayer::dynamicParametersCallback() - mode: %s", mode_.c_str());
       }
     }
     
@@ -210,6 +226,88 @@ void LaneKeepingLayer::setCost(unsigned int mx, unsigned int my, unsigned char c
     }
 
 }
+
+std::vector<Eigen::Vector2f> LaneKeepingLayer::computeShiftedCenterLine(
+    const std::vector<Eigen::Vector2f>& right_wall_points,
+    const std::vector<Eigen::Vector2f>& left_wall_points)
+{
+    // Build KDTree for the left wall points
+    Wall left_wall{left_wall_points};
+    typedef nanoflann::KDTreeSingleIndexAdaptor<
+        nanoflann::L2_Simple_Adaptor<float, Wall>,
+        Wall,
+        2 /* dimension */
+    > KDTree;
+    KDTree left_wall_kdtree(2 /* dim */, left_wall, nanoflann::KDTreeSingleIndexAdaptorParams(10 /* max leaf */));
+    left_wall_kdtree.buildIndex();
+
+    // Compute center line
+    std::vector<Eigen::Vector2f> shifted_center_line;
+
+    for (const auto& right_point : right_wall_points) {
+        // Find the nearest left wall point for the current right wall point
+        float query_pt[2] = {right_point.x(), right_point.y()};
+        size_t nearest_idx;
+        float nearest_dist_sqr;
+        left_wall_kdtree.knnSearch(&query_pt[0], 1, &nearest_idx, &nearest_dist_sqr);
+
+        const Eigen::Vector2f& left_point = left_wall_points[nearest_idx];
+
+        // Compute the midpoint between the matched points
+        Eigen::Vector2f midpoint = (right_point + left_point) * 0.5;
+
+        // Compute the direction vector from left to right wall
+        Eigen::Vector2f direction = right_point - left_point;
+        direction.normalize();
+
+        // Shift the midpoint by the given distance in the perpendicular direction
+        midpoint += shift_distance_ * direction;
+        shifted_center_line.push_back(midpoint);
+    }
+
+    return shifted_center_line;
+}
+
+void LaneKeepingLayer::computeDistancesToCenterLine(
+    const std::vector<Eigen::Vector2f>& search_area,
+    const std::vector<Eigen::Vector2f>& right_wall_points,
+    const std::vector<Eigen::Vector2f>& left_wall_points,
+    std::vector<float>& distances)
+{
+    // Compute the shifted center line
+    auto shifted_center_line = computeShiftedCenterLine(right_wall_points, left_wall_points);
+
+    // Build KDTree for the shifted center line
+    Wall center_line_wall{shifted_center_line};
+    typedef nanoflann::KDTreeSingleIndexAdaptor<
+        nanoflann::L2_Simple_Adaptor<float, Wall>,
+        Wall,
+        2 /* dimension */
+    > KDTree;
+    KDTree kdtree(2 /* dim */, center_line_wall, nanoflann::KDTreeSingleIndexAdaptorParams(10 /* max leaf */));
+    kdtree.buildIndex();
+
+    // Prepare results
+    distances.resize(search_area.size());
+
+    // Query KDTree for each point in the search area
+    for (size_t i = 0; i < search_area.size(); ++i) {
+        float query_pt[2] = {search_area[i].x(), search_area[i].y()};
+        size_t ret_index;
+        float out_dist_sqr;
+        kdtree.knnSearch(&query_pt[0], 1, &ret_index, &out_dist_sqr);
+
+        // Compute the distance to the closest shifted center point
+        distances[i] = std::sqrt(out_dist_sqr);
+        unsigned char cost = computeCost(distances[i]);
+        // Set cost for the current cell
+        unsigned int mx, my;
+        if (worldToMap(search_area[i].x(), search_area[i].y(), mx, my)) {
+            setCost(mx, my, cost);
+        }
+    }
+}
+
 
 void LaneKeepingLayer::computeDistancesToWall(
     const std::vector<Eigen::Vector2f>& search_area,
@@ -308,6 +406,12 @@ void LaneKeepingLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int 
     RCLCPP_WARN(logger_, "LaneKeepingLayer::updateCosts() global_path_ is null or has less than 2 poses");
     return;
   }
+  // check if static map is available
+  if (static_map_ == nullptr)
+  {
+    RCLCPP_WARN(logger_, "LaneKeepingLayer::updateCosts() static_map_ is null: no static map has been received");
+    return;
+  }
 
   // Check if the robot has reached the goal point and update the path index
   double distance_to_goal = distance(robot_x_, robot_y_, goal_x_, goal_y_);
@@ -323,16 +427,19 @@ void LaneKeepingLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int 
 
   if(update_costmap_) 
   {
+    shift_distance_ = keep_right_ ? distance_to_center_ : -distance_to_center_;
     std::vector<Eigen::Vector2f> right_wall_points;
+    std::vector<Eigen::Vector2f> left_wall_points;
+
     std::vector<Eigen::Vector2f> search_area;
     // Iterate through waypoint pairs in the global path
     for (size_t idx = path_index_; idx < global_path_->poses.size() - 1; ++idx)
     {
       // Get start and goal waypoints
-      double wx1 = global_path_->poses[idx].pose.position.x;
-      double wy1 = global_path_->poses[idx].pose.position.y;
-      double wx2 = global_path_->poses[idx+1].pose.position.x;
-      double wy2 = global_path_->poses[idx+1].pose.position.y;
+      double wx1 = idx == 0 ? robot_x_ : global_path_->poses[idx-1].pose.position.x;
+      double wy1 = idx == 0 ? robot_y_ : global_path_->poses[idx-1].pose.position.y;
+      double wx2 = global_path_->poses[idx].pose.position.x;
+      double wy2 = global_path_->poses[idx].pose.position.y;
 
       // Check if at least the previous waypoint is within the costmap bounds
       unsigned int mx1, my1;
@@ -382,6 +489,16 @@ void LaneKeepingLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int 
             // If the cell is in the free space, and is known, add it to the search area
             if(cost_static_map!=-1 && cost_static_map!=100) 
             {
+              if (mode_ == "center_percentage" || mode_ == "center_distance") {
+                // ignore points beyond desired distance from center line (this assumes the global path goes through the middle of the driveable area)
+                Eigen::Vector2f shifted_start = start + perpendicular * shift_distance_;
+                Eigen::Vector2f search_area_point(wx, wy);
+                Eigen::Vector2f point_to_line = search_area_point - shifted_start;
+                float dot_product = point_to_line.dot(perpendicular);
+                if ((dot_product > 0 && keep_right_) || (dot_product < 0 && !keep_right_)) {
+                  continue;
+                }
+              }
               search_area.push_back(Eigen::Vector2f(wx, wy));
             }
             // If the cell is a wall, check if it is a right wall point
@@ -390,15 +507,11 @@ void LaneKeepingLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int 
               Eigen::Vector2f point_to_wall = wall_point - start;
               float dot_product = point_to_wall.dot(perpendicular);
               // If the dot product is positive, the point is a right wall point
-              if (keep_right_) {
-                if (dot_product > 0) {
-                  right_wall_points.push_back(wall_point);
-                }
+              if (dot_product > 0) {
+                right_wall_points.push_back(wall_point);
               }
               else {
-                if (dot_product < 0) {
-                  right_wall_points.push_back(wall_point);
-                }
+                left_wall_points.push_back(wall_point);
               }
             }
           }
@@ -410,12 +523,22 @@ void LaneKeepingLayer::updateCosts(nav2_costmap_2d::Costmap2D& master_grid, int 
     }
     // Compute the distances for each cell in the search area to the right wall
     std::vector<float> distances;
-    computeDistancesToWall(search_area, right_wall_points, distances);    
+    if (mode_ == "edge_distance") {
+      if (keep_right_) {
+        computeDistancesToWall(search_area, right_wall_points, distances);
+      } else {
+        computeDistancesToWall(search_area, left_wall_points, distances);
+      }
+    } else if (mode_ == "center_distance") {
+      computeDistancesToCenterLine(search_area, right_wall_points, left_wall_points, distances);
+    } 
 
     update_costmap_ = false;
   }
   updateWithAddition(master_grid, min_i, min_j, max_i, max_j);
 }
+
+
 
 void
 LaneKeepingLayer::onFootprintChanged()

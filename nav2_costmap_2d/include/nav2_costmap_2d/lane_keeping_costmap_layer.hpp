@@ -108,6 +108,15 @@ private:
   void computeDistancesToWall(const std::vector<Eigen::Vector2f>& search_area,
                               const std::vector<Eigen::Vector2f>& right_wall_points,
                               std::vector<float>& distances);
+  
+
+  void computeDistancesToCenterLine(const std::vector<Eigen::Vector2f>& search_area,
+                                    const std::vector<Eigen::Vector2f>& right_wall_points,
+                                    const std::vector<Eigen::Vector2f>& left_wall_points,
+                                    std::vector<float>& distances);
+  
+  std::vector<Eigen::Vector2f> computeShiftedCenterLine(const std::vector<Eigen::Vector2f>& right_wall_points,
+                                                const std::vector<Eigen::Vector2f>& left_wall_points);
   /**
    * @brief Compute the cost for a given distance - Currently the cost is computed linearly directly proportional to the distance
    * @param distance distance to the wall
@@ -144,13 +153,15 @@ private:
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
 
   double max_distance_;        // Maximum distance from the right wall in meters
-  double max_cost_, min_cost_, map_resolution_;
+  double max_cost_, min_cost_, map_resolution_, distance_to_center_;
+  double shift_distance_;
   bool rolling_window_;
   bool keep_right_;
   std::string map_topic_;
   std::string global_path_topic_;
   std::string global_odom_topic_;
   std::string global_frame_;
+  std::string mode_; // "edge_distance" or "center_distance"
 
   // Costmap buffer
   nav2_costmap_2d::Costmap2D costmap_buffer_;
