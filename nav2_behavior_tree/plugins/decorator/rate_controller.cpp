@@ -15,6 +15,7 @@
 #include <chrono>
 #include <string>
 
+#include "rclcpp/rclcpp.hpp"
 #include "nav2_behavior_tree/plugins/decorator/rate_controller.hpp"
 
 namespace nav2_behavior_tree
@@ -26,6 +27,7 @@ RateController::RateController(
 : BT::DecoratorNode(name, conf),
   first_time_(false)
 {
+  node_ = config().blackboard->get<rclcpp::Node::SharedPtr>("node");
 }
 
 void RateController::initialize()
@@ -46,6 +48,7 @@ BT::NodeStatus RateController::tick()
     // the rate controller (moving from IDLE to RUNNING)
     start_ = std::chrono::high_resolution_clock::now();
     first_time_ = true;
+    RCLCPP_INFO(node_->get_logger(), "RateController: Resetting start time from IDLE");
   }
 
   setStatus(BT::NodeStatus::RUNNING);
