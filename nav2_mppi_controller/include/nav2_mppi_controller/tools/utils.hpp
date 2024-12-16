@@ -617,6 +617,10 @@ inline void shiftColumnsByOnePlace(Eigen::Ref<Eigen::ArrayXXf> e, int direction)
 {
   int size = e.size();
   if(size == 1) {return;}
+  if(abs(direction) != 1) {
+    throw std::logic_error("Invalid direction, only 1 and -1 are valid values.");
+  }
+
   if((e.cols() == 1 || e.rows() == 1) && size > 1) {
     auto start_ptr = direction == 1 ? e.data() + size - 2 : e.data() + 1;
     auto end_ptr = direction == 1 ? e.data() : e.data() + size - 1;
@@ -667,7 +671,7 @@ inline auto normalize_yaws_between_points(
  * @return Normalized yaw between points
  */
 inline auto normalize_yaws_between_points(
-  const float & goal_yaw, const Eigen::Ref<const Eigen::ArrayXf> & yaw_between_points)
+  const float goal_yaw, const Eigen::Ref<const Eigen::ArrayXf> & yaw_between_points)
 {
   int size = yaw_between_points.size();
   Eigen::ArrayXf yaws_between_points_corrected(size);
@@ -678,6 +682,18 @@ inline auto normalize_yaws_between_points(
       yaw_between_point : angles::normalize_angle(yaw_between_point + M_PIF);
   }
   return yaws_between_points_corrected;
+}
+
+/**
+ * @brief Clamps the input between the given lower and upper bounds.
+ * @param lower_bound Lower bound.
+ * @param upper_bound Upper bound.
+ * @return Clamped output.
+ */
+inline float clamp(
+  const float lower_bound, const float upper_bound, const float input)
+{
+  return std::min(upper_bound, std::max(input, lower_bound));
 }
 
 }  // namespace mppi::utils
