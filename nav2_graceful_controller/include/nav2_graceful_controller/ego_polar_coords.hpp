@@ -19,7 +19,7 @@
 
 #include "angles/angles.h"
 #include "geometry_msgs/msg/pose.hpp"
-#include "tf2/utils.hpp"
+#include "tf2/utils.h"
 
 namespace nav2_graceful_controller
 {
