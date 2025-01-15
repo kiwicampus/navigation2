@@ -62,13 +62,13 @@ void PathAngleCritic::initialize()
 void PathAngleCritic::score(CriticData & data)
 {
   if (!enabled_ ||
-    utils::withinPositionGoalTolerance(threshold_to_consider_, data.state.pose.pose, data.path))
+    utils::withinPositionGoalTolerance(threshold_to_consider_, data.state.pose.pose, data.goal))
   {
     return;
   }
 
   utils::setPathFurthestPointIfNotSet(data);
-  auto offseted_idx = std::min(
+  auto offsetted_idx = std::min(
     *data.furthest_reached_path_point + offset_from_furthest_,
       static_cast<size_t>(data.path.x.size()) - 1);
 
