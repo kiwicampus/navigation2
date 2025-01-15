@@ -20,7 +20,7 @@
 #include <string>
 
 #include "rclcpp/rclcpp.hpp"
-#include "geometry_msgs/msg/pose_stamped_array.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
 #include "nav2_behavior_tree/bt_service_node.hpp"
 #include "nav2_msgs/srv/get_costs.hpp"
 
@@ -30,6 +30,8 @@ namespace nav2_behavior_tree
 class RemoveInCollisionGoals : public BtServiceNode<nav2_msgs::srv::GetCosts>
 {
 public:
+  typedef std::vector<geometry_msgs::msg::PoseStamped> Goals;
+
   /**
    * @brief A constructor for nav2_behavior_tree::RemoveInCollisionGoals
    * @param service_node_name Service name this node creates a client for
@@ -52,8 +54,7 @@ public:
   {
     return providedBasicPorts(
       {
-        BT::InputPort<geometry_msgs::msg::PoseStampedArray>("input_goals",
-          "Original goals to remove from"),
+        BT::InputPort<Goals>("input_goals", "Original goals to remove from"),
         BT::InputPort<double>(
           "cost_threshold", 254.0,
           "Cost threshold for considering a goal in collision"),
@@ -61,8 +62,7 @@ public:
         BT::InputPort<bool>(
           "consider_unknown_as_obstacle", false,
           "Whether to consider unknown cost as obstacle"),
-        BT::OutputPort<geometry_msgs::msg::PoseStampedArray>("output_goals",
-          "Goals with in-collision goals removed"),
+        BT::OutputPort<Goals>("output_goals", "Goals with in-collision goals removed"),
       });
   }
 
@@ -70,7 +70,7 @@ private:
   bool use_footprint_;
   bool consider_unknown_as_obstacle_;
   double cost_threshold_;
-  geometry_msgs::msg::PoseStampedArray input_goals_;
+  Goals input_goals_;
 };
 
 }  // namespace nav2_behavior_tree
