@@ -21,6 +21,9 @@
     <class type="nav2_costmap_2d::SemanticSegmentationLayer" base_class_type="nav2_costmap_2d::Layer">
       <description>A plugin for semantic segmentation data produced by RGBD cameras</description>
     </class>
+    <class type="nav2_costmap_2d::PluginContainerLayer" base_class_type="nav2_costmap_2d::Layer">
+      <description>Plugin to group different layers within the same costmap</description>
+    </class>
   </library>
 
   <library path="filters">
