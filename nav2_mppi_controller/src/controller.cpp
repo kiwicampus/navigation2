@@ -104,6 +104,9 @@ geometry_msgs::msg::TwistStamped MPPIController::computeVelocityCommands(
     visualize(std::move(transformed_plan), cmd.header.stamp);
   }
 
+  trajectory_visualizer_.buildAndPublishLocalPlan(
+    optimizer_.getOptimizedTrajectory(), cmd.header.stamp);
+
   return cmd;
 }
 

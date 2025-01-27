@@ -91,6 +91,15 @@ public:
   void visualize(const nav_msgs::msg::Path & plan);
 
   /**
+    * @brief Build and publish local plan
+    * @param trajectory Trajectory to build local plan from
+    * @param cmd_stamp Command timestamp
+    */
+  void buildAndPublishLocalPlan(
+    const Eigen::ArrayXXf & trajectory,
+    const builtin_interfaces::msg::Time & cmd_stamp);
+
+  /**
     * @brief Reset object
     */
   void reset();
@@ -101,6 +110,8 @@ protected:
   trajectories_publisher_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>> transformed_path_pub_;
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>> optimal_path_pub_;
+  std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<nav_msgs::msg::Path>> local_plan_pub_;
+
 
   std::unique_ptr<nav_msgs::msg::Path> optimal_path_;
   std::unique_ptr<visualization_msgs::msg::MarkerArray> points_;

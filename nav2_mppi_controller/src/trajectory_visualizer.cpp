@@ -29,6 +29,7 @@ void TrajectoryVisualizer::on_configure(
     node->create_publisher<visualization_msgs::msg::MarkerArray>("/trajectories", 1);
   transformed_path_pub_ = node->create_publisher<nav_msgs::msg::Path>("transformed_global_plan", 1);
   optimal_path_pub_ = node->create_publisher<nav_msgs::msg::Path>("optimal_trajectory", 1);
+  local_plan_pub_ = node->create_publisher<nav_msgs::msg::Path>("local_plan", 1);
   parameters_handler_ = parameters_handler;
 
   auto getParam = parameters_handler->getParamGetter(name + ".TrajectoryVisualizer");
@@ -44,6 +45,7 @@ void TrajectoryVisualizer::on_cleanup()
   trajectories_publisher_.reset();
   transformed_path_pub_.reset();
   optimal_path_pub_.reset();
+  local_plan_pub_.reset();
 }
 
 void TrajectoryVisualizer::on_activate()
@@ -51,6 +53,7 @@ void TrajectoryVisualizer::on_activate()
   trajectories_publisher_->on_activate();
   transformed_path_pub_->on_activate();
   optimal_path_pub_->on_activate();
+  local_plan_pub_->on_activate();
 }
 
 void TrajectoryVisualizer::on_deactivate()
@@ -58,6 +61,7 @@ void TrajectoryVisualizer::on_deactivate()
   trajectories_publisher_->on_deactivate();
   transformed_path_pub_->on_deactivate();
   optimal_path_pub_->on_deactivate();
+  local_plan_pub_->on_deactivate();
 }
 
 void TrajectoryVisualizer::add(
@@ -125,6 +129,30 @@ void TrajectoryVisualizer::add(
       points_->markers.push_back(marker);
     }
   }
+}
+
+void TrajectoryVisualizer::buildAndPublishLocalPlan(
+  const Eigen::ArrayXXf & trajectory,
+  const builtin_interfaces::msg::Time & cmd_stamp)
+{
+  size_t size = trajectory.rows();
+  if (!size || local_plan_pub_->get_subscription_count() == 0) {
+    return;
+  }
+
+  auto local_plan = std::make_unique<nav_msgs::msg::Path>();
+  local_plan->header.stamp = cmd_stamp;
+  local_plan->header.frame_id = frame_id_;
+
+  for (size_t i = 0; i < size; i++) {
+    geometry_msgs::msg::PoseStamped pose_stamped;
+    pose_stamped.header.frame_id = frame_id_;
+    pose_stamped.pose = utils::createPose(trajectory(i, 0), trajectory(i, 1), 0.0);
+
+    local_plan->poses.push_back(pose_stamped);
+  }
+
+  local_plan_pub_->publish(std::move(local_plan));
 }
 
 void TrajectoryVisualizer::reset()
