@@ -306,7 +306,7 @@ void Optimizer::integrateStateVelocities(
   Eigen::Array<float, Eigen::Dynamic, 3> & trajectory,
   const Eigen::ArrayXXf & sequence) const
 {
-  float initial_yaw = tf2::getYaw(state_.pose.pose.orientation);
+  float initial_yaw = static_cast<float>(tf2::getYaw(state_.pose.pose.orientation));
 
   const auto vx = sequence.col(0);
   const auto wz = sequence.col(1);
