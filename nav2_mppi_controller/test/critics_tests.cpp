@@ -563,6 +563,7 @@ TEST(CriticTests, PathAlignCritic)
   goal.position.x = 0.85;
   critic.score(data);
   EXPECT_NEAR(costs.sum(), 0.0, 1e-6);
+  
   // provide state pose and path far enough to enable
   // but data furthest point reached is 0 and offset default is 20, so returns
   path.x(9) = 0.15;
