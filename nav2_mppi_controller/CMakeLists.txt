@@ -1,19 +1,28 @@
 cmake_minimum_required(VERSION 3.5)
 project(nav2_mppi_controller)
 
-add_definitions(-DXTENSOR_ENABLE_XSIMD)
-add_definitions(-DXTENSOR_USE_XSIMD)
-
-set(XTENSOR_USE_TBB 0)
-set(XTENSOR_USE_OPENMP 0)
-set(XTENSOR_USE_XSIMD 1)
-
-# set(XTENSOR_DEFAULT_LAYOUT column_major)  # row_major, column_major
-# set(XTENSOR_DEFAULT_TRAVERSAL row_major)  # row_major, column_major
-
 find_package(ament_cmake REQUIRED)
-find_package(xsimd REQUIRED)
-find_package(xtensor REQUIRED)
+find_package(angles REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav2_common REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(nav2_util REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(pluginlib REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(rclcpp_lifecycle REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
+find_package(visualization_msgs REQUIRED)
+find_package(Eigen3 REQUIRED)
+
+include_directories(
+  include
+  ${EIGEN3_INCLUDE_DIR}
+)
 
 include_directories(
   include
@@ -43,22 +52,7 @@ nav2_package()
 
 include(CheckCXXCompilerFlag)
 
-check_cxx_compiler_flag("-mno-avx512f" COMPILER_SUPPORTS_AVX512)
-check_cxx_compiler_flag("-msse4.2" COMPILER_SUPPORTS_SSE4)
-check_cxx_compiler_flag("-mavx2" COMPILER_SUPPORTS_AVX2)
 check_cxx_compiler_flag("-mfma" COMPILER_SUPPORTS_FMA)
-
-if(COMPILER_SUPPORTS_AVX512)
-  add_compile_options(-mno-avx512f)
-endif()
-
-if(COMPILER_SUPPORTS_SSE4)
-  add_compile_options(-msse4.2)
-endif()
-
-if(COMPILER_SUPPORTS_AVX2)
-  add_compile_options(-mavx2)
-endif()
 
 if(COMPILER_SUPPORTS_FMA)
   add_compile_options(-mfma)
@@ -116,7 +110,7 @@ if(BUILD_TESTING)
   set(ament_cmake_copyright_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
   add_subdirectory(test)
-  # add_subdirectory(benchmark)
+  add_subdirectory(benchmark)
 endif()
 
 ament_export_libraries(${libraries})
