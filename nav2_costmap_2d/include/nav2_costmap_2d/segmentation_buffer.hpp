@@ -412,6 +412,7 @@ sensor_msgs::msg::PointCloud2 visualizeTemporalTileMap(SegmentationTileMap& tile
  */
 class SegmentationCostMultimap {
 public:
+    using SharedPtr = std::shared_ptr<SegmentationCostMultimap>;
     SegmentationCostMultimap(){}
     /**
      * Constructs the SegmentationCostMultimap.
@@ -421,6 +422,7 @@ public:
      */
     SegmentationCostMultimap(const std::unordered_map<std::string, uint8_t>& nameToIdMap,
                              const std::unordered_map<std::string, CostHeuristicParams>& nameToCostMap) {
+        std::lock_guard<std::mutex> lock(mutex_);
         name_to_id_ = nameToIdMap;
         for (const auto& pair : nameToIdMap) {
             const auto& name = pair.first;
@@ -437,6 +439,7 @@ public:
      * @param cost The new CostHeuristicParams to associate with the class.
      */
     void updateCostById(uint8_t id, const CostHeuristicParams& cost) {
+        std::lock_guard<std::mutex> lock(mutex_);
         id_to_cost_[id] = cost;
     }
 
@@ -447,7 +450,12 @@ public:
      * @return The CostHeuristicParams associated with the class.
      */
     CostHeuristicParams getCostById(uint8_t id) const {
-        return id_to_cost_.at(id);
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = id_to_cost_.find(id);
+        if (it == id_to_cost_.end()) {
+            return CostHeuristicParams{0, 0, 0, 0};
+        }
+        return it->second;
     }
 
     /**
@@ -457,6 +465,7 @@ public:
      * @param cost The new CostHeuristicParams to associate with the class.
      */
     void updateCostByName(const std::string& name, const CostHeuristicParams& cost) {
+        std::lock_guard<std::mutex> lock(mutex_);
         uint8_t id = name_to_id_.at(name);
         id_to_cost_[id] = cost;
     }
@@ -468,18 +477,20 @@ public:
      * @return The CostHeuristicParams associated with the class.
      */
     CostHeuristicParams getCostByName(const std::string& name) const {
+        std::lock_guard<std::mutex> lock(mutex_);
         uint8_t id = name_to_id_.at(name);
         return id_to_cost_.at(id);
     }
 
-    bool empty()
-    {
+    bool empty() {
+        std::lock_guard<std::mutex> lock(mutex_);
         return name_to_id_.empty() || id_to_cost_.empty();
     }
 
 private:
-    std::unordered_map<std::string, uint8_t> name_to_id_; // Maps class names to class IDs
-    std::unordered_map<uint8_t, CostHeuristicParams> id_to_cost_; // Maps class IDs to CostHeuristicParams
+    mutable std::mutex mutex_;  // mutable allows locking in const methods
+    std::unordered_map<std::string, uint8_t> name_to_id_;
+    std::unordered_map<uint8_t, CostHeuristicParams> id_to_cost_;
 };
 
 namespace nav2_costmap_2d {
@@ -545,7 +556,7 @@ class SegmentationBuffer
 
     void createSegmentationCostMultimap(const vision_msgs::msg::LabelInfo& label_info);
 
-    bool isClassIdCostMapEmpty() { return segmentation_cost_multimap_.empty(); }
+    bool isClassIdCostMapEmpty() { return segmentation_cost_multimap_->empty(); }
 
     /**
      * @brief  Check if the segmentation buffer is being update at its expected rate
@@ -587,12 +598,12 @@ class SegmentationBuffer
 
     CostHeuristicParams getCostForClassId(uint8_t class_id)
     {
-        return segmentation_cost_multimap_.getCostById(class_id);
+        return segmentation_cost_multimap_->getCostById(class_id);
     }
 
     CostHeuristicParams getCostForClassName(std::string class_name)
     {
-        return segmentation_cost_multimap_.getCostByName(class_name);
+        return segmentation_cost_multimap_->getCostByName(class_name);
     }
 
    private:
@@ -617,7 +628,7 @@ class SegmentationBuffer
     double sq_min_lookahead_distance_;
     tf2::Duration tf_tolerance_;
     
-    SegmentationCostMultimap segmentation_cost_multimap_;
+    SegmentationCostMultimap::SharedPtr segmentation_cost_multimap_;
 
     SegmentationTileMap::SharedPtr temporal_tile_map_;
 

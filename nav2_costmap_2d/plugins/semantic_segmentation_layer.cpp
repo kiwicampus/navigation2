@@ -263,12 +263,15 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
 
   std::vector<std::pair<SegmentationTileMap::SharedPtr, SegmentationBuffer::SharedPtr>> segmentation_tile_maps;
   getSegmentationTileMaps(segmentation_tile_maps);
-  for (auto& tile_map : segmentation_tile_maps)
+
+  // Process each tile map one at a time
+  for (auto& tile_map_pair : segmentation_tile_maps)
   {
-    for(auto& tile: *tile_map.first)
+    auto buffer = tile_map_pair.second;
+    buffer->lock();
+    for(auto& tile: *tile_map_pair.first)
     {
-      TileWorldXY tile_world_coords = tile_map.first->indexToWorld(tile.first.x, tile.first.y);
-      // alias tile.second with a name for more readability
+      TileWorldXY tile_world_coords = tile_map_pair.first->indexToWorld(tile.first.x, tile.first.y);
       TemporalObservationQueue& obs_queue = tile.second;
       unsigned int mx, my;
       if (!worldToMap(tile_world_coords.x, tile_world_coords.y, mx, my))
@@ -277,8 +280,9 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
         continue;
       }
       unsigned int index = getIndex(mx, my);
-      CostHeuristicParams cost_params = tile_map.second->getCostForClassId(obs_queue.getClassId());
-      if(obs_queue.size() >= cost_params.samples_to_max_cost && obs_queue.getConfidenceSum() / obs_queue.size() > cost_params.mark_confidence)
+      CostHeuristicParams cost_params = buffer->getCostForClassId(obs_queue.getClassId());
+      if(obs_queue.size() >= cost_params.samples_to_max_cost && 
+         obs_queue.getConfidenceSum() / obs_queue.size() > cost_params.mark_confidence)
       {
         costmap_[index] = cost_params.max_cost;
       }
@@ -288,6 +292,7 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
       }
       touch(tile_world_coords.x, tile_world_coords.y, min_x, min_y, max_x, max_y);
     }
+    buffer->unlock();
   }
 
   current_ = true;

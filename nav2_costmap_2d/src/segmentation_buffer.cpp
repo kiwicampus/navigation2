@@ -87,7 +87,7 @@ void SegmentationBuffer::createSegmentationCostMultimap(const vision_msgs::msg::
     {
       class_to_id_map[semantic_class.class_name] = semantic_class.class_id;
     }
-    segmentation_cost_multimap_ = SegmentationCostMultimap(class_to_id_map, class_names_cost_map_);
+    segmentation_cost_multimap_ = std::make_shared<SegmentationCostMultimap>(class_to_id_map, class_names_cost_map_);
 }
 
 void SegmentationBuffer::bufferSegmentation(
@@ -212,7 +212,7 @@ std::unordered_map<std::string, CostHeuristicParams> SegmentationBuffer::getClas
 
 void SegmentationBuffer::updateClassMap(std::string new_class, CostHeuristicParams new_cost)
 {
-  segmentation_cost_multimap_.updateCostByName(new_class, new_cost);
+  segmentation_cost_multimap_->updateCostByName(new_class, new_cost);
 }
 
 bool SegmentationBuffer::isCurrent() const
