@@ -269,11 +269,6 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
   {
     auto buffer = tile_map_pair.second;
     buffer->lock();
-    if(buffer->isClassIdCostMapEmpty())
-    {
-      buffer->unlock();
-      continue;
-    }
     for(auto& tile: *tile_map_pair.first)
     {
       TileWorldXY tile_world_coords = tile_map_pair.first->indexToWorld(tile.first.x, tile.first.y);
