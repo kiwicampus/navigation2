@@ -427,8 +427,14 @@ public:
         for (const auto& pair : nameToIdMap) {
             const auto& name = pair.first;
             uint8_t id = pair.second;
-            CostHeuristicParams cost = nameToCostMap.at(name);
-            id_to_cost_[id] = cost;
+            auto cost_it = nameToCostMap.find(name);
+            if (cost_it == nameToCostMap.end()) {
+                // This shouldn't happen because we already checked in createSegmentationCostMultimap
+                // but let's be extra safe
+                id_to_cost_[id] = CostHeuristicParams{0, 0, 0, 0};
+                continue;
+            }
+            id_to_cost_[id] = cost_it->second;
         }
     }
 

@@ -84,10 +84,17 @@ void SegmentationBuffer::createSegmentationCostMultimap(const vision_msgs::msg::
 {
   std::unordered_map<std::string, uint8_t> class_to_id_map;
   for (const auto& semantic_class : label_info.class_map)
-    {
-      class_to_id_map[semantic_class.class_name] = semantic_class.class_id;
+  {
+    const auto& name = semantic_class.class_name;
+    if (class_names_cost_map_.find(name) == class_names_cost_map_.end()) {
+      RCLCPP_ERROR(logger_, 
+        "CRITICAL ERROR: Class '%s' from label_info is not defined in the costmap parameters! This class will be ignored.", 
+        name.c_str());
+      continue;
     }
-    segmentation_cost_multimap_ = std::make_shared<SegmentationCostMultimap>(class_to_id_map, class_names_cost_map_);
+    class_to_id_map[name] = semantic_class.class_id;
+  }
+  segmentation_cost_multimap_ = std::make_shared<SegmentationCostMultimap>(class_to_id_map, class_names_cost_map_);
 }
 
 void SegmentationBuffer::bufferSegmentation(
