@@ -245,6 +245,7 @@ bool SimpleChargingDock::isDocked()
 
   if (dock_pose_.header.frame_id.empty()) {
     // Dock pose is not yet valid
+    RCLCPP_INFO(node_->get_logger(), "Dock pose is not yet valid");
     return false;
   }
 
@@ -263,6 +264,9 @@ bool SimpleChargingDock::isDocked()
   double d = std::hypot(
     base_pose.pose.position.x - dock_pose_.pose.position.x,
     base_pose.pose.position.y - dock_pose_.pose.position.y);
+  RCLCPP_WARN_THROTTLE(node_->get_logger(), *(node_->get_clock()), 3000, "Docking threshold: %f, distance: %f", docking_threshold_, d);
+  RCLCPP_WARN_THROTTLE(node_->get_logger(), *(node_->get_clock()), 3000, "Dock pose: %f, %f, %f", dock_pose_.pose.position.x, dock_pose_.pose.position.y, tf2::getYaw(dock_pose_.pose.orientation));
+  RCLCPP_WARN_THROTTLE(node_->get_logger(), *(node_->get_clock()), 3000, "Base pose: %f, %f, %f", base_pose.pose.position.x, base_pose.pose.position.y, tf2::getYaw(base_pose.pose.orientation));
   return d < docking_threshold_;
 }
 
