@@ -32,6 +32,7 @@
 
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "nav_msgs/msg/path.hpp"
+#include "nav2_msgs/msg/trajectory.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
 #include "rclcpp/rclcpp.hpp"
@@ -168,6 +169,34 @@ inline geometry_msgs::msg::TwistStamped toTwistStamped(
   twist.twist.linear.y = vy;
 
   return twist;
+}
+
+inline std::unique_ptr<nav2_msgs::msg::Trajectory> toTrajectoryMsg(
+  const Eigen::ArrayXXf & trajectory,
+  const models::ControlSequence & control_sequence,
+  const double & model_dt,
+  const std_msgs::msg::Header & header)
+{
+  auto trajectory_msg = std::make_unique<nav2_msgs::msg::Trajectory>();
+  trajectory_msg->header = header;
+  trajectory_msg->points.resize(trajectory.rows());
+
+  for (int i = 0; i < trajectory.rows(); ++i) {
+    auto & curr_pt = trajectory_msg->points[i];
+    curr_pt.time_from_start = rclcpp::Duration::from_seconds(i * model_dt);
+    curr_pt.pose.position.x = trajectory(i, 0);
+    curr_pt.pose.position.y = trajectory(i, 1);
+    tf2::Quaternion quat;
+    quat.setRPY(0.0, 0.0, trajectory(i, 2));
+    curr_pt.pose.orientation = tf2::toMsg(quat);
+    curr_pt.velocity.linear.x = control_sequence.vx(i);
+    curr_pt.velocity.angular.z = control_sequence.wz(i);
+    if (control_sequence.vy.size() > 0) {
+      curr_pt.velocity.linear.y = control_sequence.vy(i);
+    }
+  }
+
+  return trajectory_msg;
 }
 
 /**
@@ -636,7 +665,7 @@ inline void shiftColumnsByOnePlace(Eigen::Ref<Eigen::ArrayXXf> e, int direction)
  * @brief Normalize the yaws between points on the basis of final yaw angle
  *    of the trajectory.
  * @param last_yaws Final yaw angles of the trajectories.
- * @param yaw_between_points Yaw angles calculated between x and y co-ordinates of the trajectories.
+ * @param yaw_between_points Yaw angles calculated between x and y coordinates of the trajectories.
  * @return Normalized yaw between points.
  */
 inline auto normalize_yaws_between_points(
@@ -658,7 +687,7 @@ inline auto normalize_yaws_between_points(
 /**
  * @brief Normalize the yaws between points on the basis of goal angle.
  * @param goal_yaw Goal yaw angle.
- * @param yaw_between_points Yaw angles calculated between x and y co-ordinates of the trajectories.
+ * @param yaw_between_points Yaw angles calculated between x and y coordinates of the trajectories.
  * @return Normalized yaw between points
  */
 inline auto normalize_yaws_between_points(
