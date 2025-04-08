@@ -103,8 +103,43 @@ void Optimizer::getParams()
 
   s.constraints = s.base_constraints;
 
+  // Setup custom callbacks for parameters that require a reset
+  auto resetCb = [this](const rclcpp::Parameter & /*param*/,
+                       rcl_interfaces::msg::SetParametersResult & /*result*/) {
+    RCLCPP_INFO(logger_, "Parameter requiring reset changed, resetting MPPI Optimizer.");
+    reset();
+  };
+
+  // Parameters that require a reset when changed
+  std::vector<std::string> resetParams = {
+    "model_dt", "time_steps", "batch_size", "motion_model", "temperature", 
+    "gamma", "vx_std", "vy_std", "wz_std", "retry_attempt_limit"
+  };
+  
+  for (const auto& param : resetParams) {
+    parameters_handler_->addParamCallback(name_ + "." + param, resetCb);
+  }
+
+  // Callback to update active constraints when base constraints change
+  auto updateConstraintsCb = [&](const rclcpp::Parameter & /*param*/,
+                                 rcl_interfaces::msg::SetParametersResult & /*result*/) {
+    RCLCPP_INFO(logger_, "Base constraint parameter changed, updating active constraints.");
+    s.constraints = s.base_constraints;
+  };
+
+  // Parameters that update constraints when changed
+  std::vector<std::string> constraintParams = {
+    "vx_max", "vx_min", "vy_max", "wz_max", "ax_max", 
+    "ax_min", "ay_max", "ay_min", "az_max"
+  };
+  
+  for (const auto& param : constraintParams) {
+    parameters_handler_->addParamCallback(name_ + "." + param, updateConstraintsCb);
+  }
+
   setMotionModel(motion_model_name);
-  parameters_handler_->addPostCallback([this]() {reset();});
+  // To avoid resetting the optimizer for every parameter change, we add callbacks only for the params that need an optimizer reset
+  // parameters_handler_->addPostCallback([this]() {reset();});
 
   double controller_frequency;
   getParentParam(controller_frequency, "controller_frequency", 0.0, ParameterType::Static);

@@ -171,7 +171,7 @@ protected:
 
   bool verbose_{false};
 
-  std::unordered_map<std::string, std::function<get_param_func_t>> get_param_callbacks_;
+  std::unordered_map<std::string, std::vector<std::function<get_param_func_t>>> get_param_callbacks_;
 
   std::vector<std::function<pre_callback_t>> pre_callbacks_;
   std::vector<std::function<post_callback_t>> post_callbacks_;
@@ -191,7 +191,7 @@ inline auto ParametersHandler::getParamGetter(const std::string & ns)
 template<typename T>
 void ParametersHandler::addParamCallback(const std::string & name, T && callback)
 {
-  get_param_callbacks_[name] = callback;
+  get_param_callbacks_[name].push_back(callback);
 }
 
 template<typename T>

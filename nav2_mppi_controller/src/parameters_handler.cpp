@@ -68,7 +68,9 @@ ParametersHandler::dynamicParamsCallback(
     if (auto callback = get_param_callbacks_.find(param_name);
       callback != get_param_callbacks_.end())
     {
-      callback->second(param, result);
+      for (auto & cb : callback->second) {
+        cb(param, result);
+      }
     }
   }
 
