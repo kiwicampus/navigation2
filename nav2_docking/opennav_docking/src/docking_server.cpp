@@ -429,21 +429,29 @@ bool DockingServer::approachDock(Dock * dock, geometry_msgs::msg::PoseStamped & 
     geometry_msgs::msg::PoseStamped target_pose = dock_pose;
     target_pose.header.stamp = rclcpp::Time(0);
 
-    // Make sure that the target pose is pointing at the robot when moving backwards
-    // This is to ensure that the robot doesn't try to dock from the wrong side
-    if (dock_backwards_) {
-      target_pose.pose.orientation = nav2_util::geometry_utils::orientationAroundZAxis(
-        tf2::getYaw(target_pose.pose.orientation) + M_PI);
-    }
+    // // Make sure that the target pose is pointing at the robot when moving backwards
+    // // This is to ensure that the robot doesn't try to dock from the wrong side
+    // if (dock_backwards_) {
+    //   target_pose.pose.orientation = nav2_util::geometry_utils::orientationAroundZAxis(
+    //     tf2::getYaw(target_pose.pose.orientation) + M_PI);
+    // }
 
     // The control law can get jittery when close to the end when atan2's can explode.
     // Thus, we backward project the controller's target pose a little bit after the
     // dock so that the robot never gets to the end of the spiral before its in contact
     // with the dock to stop the docking procedure.
-    const double backward_projection = -0.25;
+    const double backward_projection = 0.25;
     const double yaw = tf2::getYaw(target_pose.pose.orientation);
     target_pose.pose.position.x += cos(yaw) * backward_projection;
     target_pose.pose.position.y += sin(yaw) * backward_projection;
+
+    // Make sure that the target pose is pointing at the robot when moving backwards
+    // This is to ensure that the robot doesn't try to dock from the wrong side
+    if (dock_backwards_) {
+      target_pose.pose.orientation = 
+        nav2_util::geometry_utils::orientationAroundZAxis(yaw + M_PI);
+    }
+
     tf2_buffer_->transform(target_pose, target_pose, base_frame_);
 
     // Compute and publish controls
@@ -606,16 +614,27 @@ void DockingServer::undockRobot()
 
     // Check if the robot is docked before proceeding
     if (dock->isCharger() && (!dock->isDocked() && !dock->isCharging())) {
-      RCLCPP_INFO(get_logger(), "Robot is not in the dock, no need to undock");
+      RCLCPP_INFO(
+        get_logger(),
+        "Robot is not in the dock, no need to undock. Dock status: isDocked=%s, isCharging=%s",
+        dock->isDocked() ? "true" : "false",
+        dock->isCharging() ? "true" : "false");
+      result->success = true;
+      undocking_action_server_->succeeded_current(result);
       return;
     }
 
     // Get "dock pose" by finding the robot pose
     geometry_msgs::msg::PoseStamped dock_pose = getRobotPoseInFrame(fixed_frame_);
 
+    RCLCPP_INFO(get_logger(), "Dock pose target: %f, %f, %f", dock_pose.pose.position.x, dock_pose.pose.position.y, tf2::getYaw(dock_pose.pose.orientation));
+    RCLCPP_INFO(get_logger(), "Dock pose frame target: %s", dock_pose.header.frame_id.c_str());
+
     // Get staging pose (in fixed frame)
     geometry_msgs::msg::PoseStamped staging_pose =
       dock->getStagingPose(dock_pose.pose, dock_pose.header.frame_id);
+
+    RCLCPP_INFO(get_logger(), "Staging pose result: %f, %f, %f", staging_pose.pose.position.x, staging_pose.pose.position.y, tf2::getYaw(staging_pose.pose.orientation));
 
     // Control robot to staging pose
     rclcpp::Time loop_start = this->now();
