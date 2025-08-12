@@ -549,7 +549,15 @@ class SegmentationBuffer
      * @brief  Transforms a PointCloud to the global frame and buffers it
      * <b>Note: The burden is on the user to make sure the transform is available... ie they should
      * use a MessageNotifier</b>
+     * 
+     * This function processes semantic segmentation data and stores observations in tiles.
+     * When multiple observations exist for the same tile, the observation with the highest
+     * max_cost is selected. This ensures that dangerous areas (high max_cost) are prioritized
+     * over safe areas (low max_cost) for navigation safety.
+     * 
      * @param  cloud The cloud to be buffered
+     * @param  segmentation The semantic segmentation image containing class IDs
+     * @param  confidence The confidence image containing confidence values for each pixel
      */
     void bufferSegmentation(const sensor_msgs::msg::PointCloud2& cloud, const sensor_msgs::msg::Image& segmentation,
                             const sensor_msgs::msg::Image& confidence);
