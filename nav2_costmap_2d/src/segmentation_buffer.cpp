@@ -159,19 +159,22 @@ void SegmentationBuffer::bufferSegmentation(
 
         TileIndex costmap_index = temporal_tile_map_->worldToIndex(*iter_x_global, *iter_y_global);
 
-        // Find the observation with the greater confidence for each tile
+        // Select observation with highest max_cost for each tile
+        // max_cost is used as the primary criterion for observation selection
+        // This ensures that dangerous areas (high max_cost) are prioritized over safe areas (low max_cost)
         auto it = best_observations_idxs.find(costmap_index);
-        // if an observation already exists in the index, compare its confidence to the current
-        // one and if its greater store this element as the new best confidence index for the tile
         if (it != best_observations_idxs.end()) {
-          if(confidence.data[pixel_idx] > confidence.data[best_observations_idxs[costmap_index]])
-          {
+          uint8_t current_class = segmentation.data[pixel_idx];
+          uint8_t existing_class = segmentation.data[it->second];
+
+          auto current_cost = segmentation_cost_multimap_->getCostById(current_class);
+          auto existing_cost = segmentation_cost_multimap_->getCostById(existing_class);
+
+          // Compare max_cost values - higher max_cost indicates more dangerous/restricted areas
+          if (current_cost.max_cost > existing_cost.max_cost) {
             best_observations_idxs[costmap_index] = pixel_idx;
           }
-        }
-        // if this is the first observation for the tile index just store its confidence as the best one
-        else
-        {
+        } else {
           best_observations_idxs[costmap_index] = pixel_idx;
         }
         ++iter_x_global;
