@@ -53,7 +53,8 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
                                        double expected_update_rate, double max_lookahead_distance,
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
-                                       tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map)
+                                       tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map,
+                                       bool use_cost_selection)
   : tf2_buffer_(tf2_buffer)
   , class_types_(class_types)
   , class_names_cost_map_(class_names_cost_map)
@@ -72,6 +73,10 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   last_updated_ = node->now();
   temporal_tile_map_ = std::make_shared<SegmentationTileMap>(costmap_resolution, tile_map_decay_time);
   visualize_tile_map_ = visualize_tile_map;
+  use_cost_selection_ = use_cost_selection;
+  RCLCPP_INFO(logger_, "SegmentationBuffer [%s]: Selection method = %s", 
+              buffer_source_.c_str(), 
+              use_cost_selection_ ? "COST-BASED (max_cost)" : "CONFIDENCE-BASED");
   if(visualize_tile_map_)
   {
     tile_map_pub_ = node->create_publisher<sensor_msgs::msg::PointCloud2>(buffer_source + "/tile_map",1);
@@ -159,20 +164,27 @@ void SegmentationBuffer::bufferSegmentation(
 
         TileIndex costmap_index = temporal_tile_map_->worldToIndex(*iter_x_global, *iter_y_global);
 
-        // Select observation with highest max_cost for each tile
-        // max_cost is used as the primary criterion for observation selection
-        // This ensures that dangerous areas (high max_cost) are prioritized over safe areas (low max_cost)
+        // Selection policy per tile: cost-based (max_cost) or confidence-based
         auto it = best_observations_idxs.find(costmap_index);
         if (it != best_observations_idxs.end()) {
-          uint8_t current_class = segmentation.data[pixel_idx];
-          uint8_t existing_class = segmentation.data[it->second];
-
-          auto current_cost = segmentation_cost_multimap_->getCostById(current_class);
-          auto existing_cost = segmentation_cost_multimap_->getCostById(existing_class);
-
-          // Compare max_cost values - higher max_cost indicates more dangerous/restricted areas
-          if (current_cost.max_cost > existing_cost.max_cost) {
-            best_observations_idxs[costmap_index] = pixel_idx;
+          if (use_cost_selection_) {
+            // Cost-based: pick highest max_cost
+            uint8_t current_class = segmentation.data[pixel_idx];
+            uint8_t existing_class = segmentation.data[it->second];
+            auto current_cost = segmentation_cost_multimap_->getCostById(current_class);
+            auto existing_cost = segmentation_cost_multimap_->getCostById(existing_class);
+            if (current_cost.max_cost > existing_cost.max_cost) {
+              best_observations_idxs[costmap_index] = pixel_idx;
+              RCLCPP_DEBUG(logger_, "COST-BASED: Replaced tile observation - current_class=%d (max_cost=%d) > existing_class=%d (max_cost=%d)", 
+                          current_class, current_cost.max_cost, existing_class, existing_cost.max_cost);
+            }
+          } else {
+            // Confidence-based: pick highest confidence
+            if (confidence.data[pixel_idx] > confidence.data[it->second]) {
+              best_observations_idxs[costmap_index] = pixel_idx;
+              RCLCPP_DEBUG(logger_, "CONFIDENCE-BASED: Replaced tile observation - current_confidence=%d > existing_confidence=%d", 
+                          confidence.data[pixel_idx], confidence.data[it->second]);
+            }
           }
         } else {
           best_observations_idxs[costmap_index] = pixel_idx;

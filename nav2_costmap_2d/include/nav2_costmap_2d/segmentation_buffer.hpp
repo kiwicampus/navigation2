@@ -538,7 +538,8 @@ class SegmentationBuffer
                        std::unordered_map<std::string, CostHeuristicParams> class_names_cost_map, double observation_keep_time,
                        double expected_update_rate, double max_lookahead_distance, double min_lookahead_distance,
                        tf2_ros::Buffer& tf2_buffer, std::string global_frame, std::string sensor_frame,
-                       tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map = false);
+                       tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map = false,
+                       bool use_cost_selection = true);
 
     /**
      * @brief  Destructor... cleans up
@@ -646,6 +647,8 @@ class SegmentationBuffer
 
     bool visualize_tile_map_;
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr tile_map_pub_;
+    // If true, select observation per tile using highest max_cost. If false, use highest confidence
+    bool use_cost_selection_ = true;
 };
 }  // namespace nav2_costmap_2d
 #endif  // NAV2_COSTMAP_2D__SEGMENTATION_BUFFER_HPP_

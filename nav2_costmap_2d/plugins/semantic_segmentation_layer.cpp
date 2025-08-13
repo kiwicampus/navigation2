@@ -113,6 +113,7 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "min_obstacle_distance", rclcpp::ParameterValue(0.3));
     declareParameter(source + "." + "tile_map_decay_time", rclcpp::ParameterValue(5.0));
     declareParameter(source + "." + "visualize_tile_map", rclcpp::ParameterValue(false));
+    declareParameter(source + "." + "use_cost_selection", rclcpp::ParameterValue(true));
     
     node->get_parameter(name_ + "." + source + "." + "segmentation_topic", segmentation_topic);
     node->get_parameter(name_ + "." + source + "." + "confidence_topic", confidence_topic);
@@ -126,6 +127,8 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + source + "." + "min_obstacle_distance", min_obstacle_distance);
     node->get_parameter(name_ + "." + source + "." + "tile_map_decay_time", tile_map_decay_time);
     node->get_parameter(name_ + "." + source + "." + "visualize_tile_map", visualize_tile_map);
+    bool use_cost_selection = true;
+    node->get_parameter(name_ + "." + source + "." + "use_cost_selection", use_cost_selection);
     if (class_types_string.empty())
     {
       RCLCPP_ERROR(logger_, "no class types defined for source %s. Segmentation plugin cannot work this way", source.c_str());
@@ -184,7 +187,8 @@ void SemanticSegmentationLayer::onInitialize()
     auto segmentation_buffer = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
       node, source, class_types_string, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
       min_obstacle_distance, *tf_, global_frame_, sensor_frame,
-      tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map);
+      tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map,
+      use_cost_selection);
 
     segmentation_buffers_.push_back(segmentation_buffer);
     
