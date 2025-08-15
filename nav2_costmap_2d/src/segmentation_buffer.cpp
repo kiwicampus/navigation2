@@ -202,8 +202,16 @@ void SegmentationBuffer::bufferSegmentation(
     {
       int img_idx_for_best_obs = idx.second;
       TileIndex costmap_index = idx.first;
-      TileObservation best_obs{segmentation.data[img_idx_for_best_obs], static_cast<float>(confidence.data[img_idx_for_best_obs]), cloud_time_seconds};
-      temporal_tile_map_->pushObservation(best_obs, costmap_index);
+      uint8_t class_id = segmentation.data[img_idx_for_best_obs];
+      
+      // Only process observations with defined class IDs
+      if (segmentation_cost_multimap_->hasClassId(class_id)) {
+        TileObservation best_obs{class_id, static_cast<float>(confidence.data[img_idx_for_best_obs]), cloud_time_seconds};
+        temporal_tile_map_->pushObservation(best_obs, costmap_index);
+      } else {
+        RCLCPP_DEBUG(logger_, "SegmentationBuffer [%s]: Skipping undefined class_id %d in tile (%d, %d)", 
+                      buffer_source_.c_str(), class_id, costmap_index.x, costmap_index.y);
+      }
     }
     temporal_tile_map_->unlock();
 

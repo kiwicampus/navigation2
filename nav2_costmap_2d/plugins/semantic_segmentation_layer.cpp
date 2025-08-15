@@ -285,7 +285,7 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
       }
       unsigned int index = getIndex(mx, my);
       CostHeuristicParams cost_params = buffer->getCostForClassId(obs_queue.getClassId());
-      if(obs_queue.size() >= cost_params.samples_to_max_cost && 
+      if(static_cast<int>(obs_queue.size()) >= cost_params.samples_to_max_cost && 
          obs_queue.getConfidenceSum() / obs_queue.size() > cost_params.mark_confidence)
       {
         costmap_[index] = cost_params.max_cost;

@@ -55,8 +55,8 @@
  */
 struct CostHeuristicParams
 {
- uint8_t base_cost, max_cost, mark_confidence;
- int samples_to_max_cost;
+    uint8_t base_cost, max_cost, mark_confidence;
+    int samples_to_max_cost;
 };
 
 /**
@@ -107,107 +107,200 @@ struct TileObservation {
 
 /**
  * @brief Manages temporal observations with a decay mechanism, maintaining a sum of confidences.
- * Wraps a std::deque to store observations, allowing for efficient insertion and removal.
+ * Wraps multiple std::deque objects to store observations per class ID, allowing for efficient insertion and removal.
+ * Uses class ID -1 as a sentinel value to indicate no dominant class exists.
  */
-class TemporalObservationQueue {
-private:
-
-    std::deque<TileObservation> queue_;
-    float confidence_sum_ = 0.0f;
+class TemporalObservationQueue
+{
+   private:
+    std::unordered_map<uint8_t, std::deque<TileObservation>> class_queues_;
+    std::unordered_map<uint8_t, float> class_confidence_sums_;
+    int dominant_class_id_ = -1;
+    size_t dominant_class_size_ = 0;
     double decay_time_;
 
-public:
-    TemporalObservationQueue(){}
+   public:
+    TemporalObservationQueue() {}
 
     /**
-     * @brief Adds an observation to the queue, resets the queue if class ID changes.
+     * @brief Adds an observation to the appropriate class queue, manages dominant class tracking.
      * @param tile_obs The observation to add.
      */
-    void push(TileObservation tile_obs) {
-        if(tile_obs.class_id != getClassId())
+    void push(TileObservation tile_obs)
+    {
+        uint8_t class_id = tile_obs.class_id;
+        
+        // Add observation to the appropriate class queue
+        auto& queue = class_queues_[class_id];
+        queue.push_back(tile_obs);
+        
+        // Update confidence sum for this class
+        class_confidence_sums_[class_id] += tile_obs.confidence;
+        
+        // Check if this class now has the most samples
+        size_t current_class_size = queue.size();
+        if (current_class_size > dominant_class_size_)
         {
-            std::deque<TileObservation> emptyQueue;
-            std::swap(queue_, emptyQueue);
-            confidence_sum_ = 0.0;
+            // New dominant class - purge all other classes
+            if (dominant_class_id_ != -1 && dominant_class_id_ != class_id)
+            {
+                for (auto it = class_queues_.begin(); it != class_queues_.end();)
+                {
+                    if (it->first != class_id)
+                    {
+                        class_confidence_sums_.erase(it->first);
+                        it = class_queues_.erase(it);
+                    }
+                    else
+                    {
+                        ++it;
+                    }
+                }
+            }
+            dominant_class_id_ = class_id;
+            dominant_class_size_ = current_class_size;
         }
-        confidence_sum_ += tile_obs.confidence;
-        queue_.push_back(tile_obs);
     }
 
     /**
-     * @brief Removes the oldest observation from the queue.
+     * @brief Removes the oldest observation from the dominant class queue.
      */
-    void pop() {
-        if (!queue_.empty()) {
-            confidence_sum_ -= queue_.front().confidence;
-            queue_.pop_front();
+    void pop()
+    {
+        if (dominant_class_id_ != -1 && !class_queues_[dominant_class_id_].empty())
+        {
+            auto& dominant_queue = class_queues_[dominant_class_id_];
+            class_confidence_sums_[dominant_class_id_] -= dominant_queue.front().confidence;
+            dominant_queue.pop_front();
+            dominant_class_size_--;
+            
+            // If dominant queue is now empty, find new dominant class
+            if (dominant_class_size_ == 0)
+            {
+                dominant_class_id_ = -1;
+                dominant_class_size_ = 0;
+                
+                // Find new dominant class among remaining queues
+                for (const auto& pair : class_queues_)
+                {
+                    if (pair.second.size() > dominant_class_size_)
+                    {
+                        dominant_class_id_ = pair.first;
+                        dominant_class_size_ = pair.second.size();
+                    }
+                }
+            }
         }
     }
 
     /**
-     * @brief Checks if the queue is empty.
+     * @brief Checks if the dominant class queue is empty.
      * @return True if empty, false otherwise.
      */
-    bool empty() const {return queue_.empty();}
+    bool empty() const { return dominant_class_id_ == -1; }
 
     /**
-     * @brief Gets the size of the queue.
-     * @return The number of observations in the queue.
+     * @brief Gets the size of the dominant class queue.
+     * @return The number of observations in the dominant class queue.
      */
-    int size() const { return queue_.size(); }
+    size_t size() const { return dominant_class_size_; }
 
     /**
      * @brief Sets the decay time for observations.
      * @param decay_time The decay time in seconds.
      */
-    void setDecayTime(float decay_time)
-    {
-        decay_time_ = decay_time;
-    }
+    void setDecayTime(float decay_time) { decay_time_ = decay_time; }
 
     /**
-     * @brief Gets the current sum of confidence values of all observations.
-     * @return The sum of confidences.
+     * @brief Gets the current sum of confidence values of the dominant class.
+     * @return The sum of confidences for the dominant class.
      */
-    float getConfidenceSum() const {
-        return confidence_sum_;
-    }
-
-    /**
-     * @brief Gets the class ID of the most recent observation.
-     * @return The class ID, or 0 if queue is empty.
-     */
-    uint8_t getClassId() const
-    {
-        if(!queue_.empty())
+    float getConfidenceSum() const 
+    { 
+        if (dominant_class_id_ != -1)
         {
-            return queue_.back().class_id;
+            auto it = class_confidence_sums_.find(dominant_class_id_);
+            return (it != class_confidence_sums_.end()) ? it->second : 0.0f;
         }
-        return 0;
+        return 0.0f;
     }
 
     /**
-     * @brief Returns a copy of the deque object. Will have overhead
+     * @brief Gets the class ID of the dominant class (most samples).
+     * @return The class ID, or -1 if no observations exist (-1 is used as sentinel value).
+     */
+    int getClassId() const { return dominant_class_id_; }
+
+    /**
+     * @brief Returns a copy of the dominant class queue. Will have overhead
      * due to the copy operation but avoids race conditions since
      * the object in the class is not made editable by others
-     * @return The class cost, or 0 if queue is empty.
+     * @return The dominant class queue, or empty deque if no dominant class.
      */
-    std::deque<TileObservation> getQueue()
-    {
-        return queue_;
-    } 
+    std::deque<TileObservation> getQueue() 
+    { 
+        if (dominant_class_id_ != -1)
+        {
+            auto it = class_queues_.find(dominant_class_id_);
+            return (it != class_queues_.end()) ? it->second : std::deque<TileObservation>();
+        }
+        return std::deque<TileObservation>();
+    }
 
     /**
-     * @brief Removes observations older than the decay time.
+     * @brief Removes observations older than the decay time from all class queues.
      * @param current_time The current time for comparison.
      */
-    void purgeOld(double current_time) {
-        while (!queue_.empty()) {
-            double age = current_time - queue_.front().timestamp;
-            if (age > decay_time_) {
-                pop();
-            } else {
-                break;
+    void purgeOld(double current_time)
+    {
+        std::vector<uint8_t> classes_to_remove;
+        
+        for (auto& class_pair : class_queues_)
+        {
+            uint8_t class_id = class_pair.first;
+            auto& queue = class_pair.second;
+            
+            while (!queue.empty())
+            {
+                double age = current_time - queue.front().timestamp;
+                if (age > decay_time_)
+                {
+                    class_confidence_sums_[class_id] -= queue.front().confidence;
+                    queue.pop_front();
+                }
+                else
+                {
+                    break;
+                }
+            }
+            
+            // Mark empty classes for removal
+            if (queue.empty())
+            {
+                classes_to_remove.push_back(class_id);
+            }
+        }
+        
+        // Remove empty classes and update dominant class if necessary
+        for (uint8_t class_id : classes_to_remove)
+        {
+            class_queues_.erase(class_id);
+            class_confidence_sums_.erase(class_id);
+            
+            // If we removed the dominant class, find new dominant
+            if (dominant_class_id_ == class_id)
+            {
+                dominant_class_id_ = -1;
+                dominant_class_size_ = 0;
+                
+                for (const auto& pair : class_queues_)
+                {
+                    if (pair.second.size() > dominant_class_size_)
+                    {
+                        dominant_class_id_ = pair.first;
+                        dominant_class_size_ = pair.second.size();
+                    }
+                }
             }
         }
     }
@@ -462,6 +555,17 @@ public:
             return CostHeuristicParams{0, 0, 0, 0};
         }
         return it->second;
+    }
+
+    /**
+     * Checks if a class ID exists in the cost mapping.
+     * 
+     * @param id The class ID to check.
+     * @return true if the class ID exists, false otherwise.
+     */
+    bool hasClassId(uint8_t id) const {
+        // No lock needed - only reading, no concurrent modifications
+        return id_to_cost_.find(id) != id_to_cost_.end();
     }
 
     /**
