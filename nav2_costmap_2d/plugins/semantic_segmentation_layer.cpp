@@ -145,6 +145,7 @@ void SemanticSegmentationLayer::onInitialize()
       declareParameter(source + "." + class_type + ".max_cost", rclcpp::ParameterValue(0));
       declareParameter(source + "." + class_type + ".mark_confidence", rclcpp::ParameterValue(0));
       declareParameter(source + "." + class_type + ".samples_to_max_cost", rclcpp::ParameterValue(0));
+      declareParameter(source + "." + class_type + ".marking", rclcpp::ParameterValue(false));
       
       node->get_parameter(name_ + "." + source + "." + class_type + ".classes", classes_ids);
       if (classes_ids.empty())
@@ -157,6 +158,8 @@ void SemanticSegmentationLayer::onInitialize()
       node->get_parameter(name_ + "." + source + "." + class_type + ".max_cost", cost_params.max_cost);
       node->get_parameter(name_ + "." + source + "." + class_type + ".mark_confidence", cost_params.mark_confidence);
       node->get_parameter(name_ + "." + source + "." + class_type + ".samples_to_max_cost", cost_params.samples_to_max_cost);
+      node->get_parameter(name_ + "." + source + "." + class_type + ".marking", cost_params.marking);
+      
       for (auto& class_id : classes_ids)
       {
         class_map.insert(std::pair<std::string, CostHeuristicParams>(class_id, cost_params));
@@ -276,7 +279,7 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
     for(auto& tile: *tile_map_pair.first)
     {
       TileWorldXY tile_world_coords = tile_map_pair.first->indexToWorld(tile.first.x, tile.first.y);
-      TemporalObservationQueue& obs_queue = tile.second;
+      TemporalObservationQueue& obs_queue = tile.second;      
       unsigned int mx, my;
       if (!worldToMap(tile_world_coords.x, tile_world_coords.y, mx, my))
       {
@@ -520,6 +523,16 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                 for(auto & class_name : class_names_for_type){
                   cost_params = buffer->getCostForClassName(class_name);
                   cost_params.samples_to_max_cost = parameter.as_int();
+                  buffer->updateClassMap(class_name, cost_params);
+                }
+              }
+              if (name == name_ + "." + source +  "." + class_type + ".marking") {
+                CostHeuristicParams cost_params;
+                std::vector<std::string> class_names_for_type;
+                node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
+                for(auto & class_name : class_names_for_type){
+                  cost_params = buffer->getCostForClassName(class_name);
+                  cost_params.marking = parameter.as_bool();
                   buffer->updateClassMap(class_name, cost_params);
                 }
               }

@@ -57,6 +57,7 @@ struct CostHeuristicParams
 {
     uint8_t base_cost, max_cost, mark_confidence;
     int samples_to_max_cost;
+    bool marking;
 };
 
 /**
@@ -125,8 +126,9 @@ class TemporalObservationQueue
     /**
      * @brief Adds an observation to the appropriate class queue, manages dominant class tracking.
      * @param tile_obs The observation to add.
+     * @param cost_params The cost parameters for this class (for marking logic).
      */
-    void push(TileObservation tile_obs)
+    void push(TileObservation tile_obs, const CostHeuristicParams& cost_params)
     {
         uint8_t class_id = tile_obs.class_id;
         
@@ -137,13 +139,23 @@ class TemporalObservationQueue
         // Update confidence sum for this class
         class_confidence_sums_[class_id] += tile_obs.confidence;
         
-        // Check if this class now has the most samples
+        // Check if this class should become dominant
         size_t current_class_size = queue.size();
-        if (current_class_size > dominant_class_size_)
+        bool should_become_dominant = false;
+        
+        if (cost_params.marking) {
+            should_become_dominant = true;
+        } else {
+            //logic for non-marking classes: only compete by size
+            should_become_dominant = (current_class_size > dominant_class_size_);
+        }
+        
+        if (should_become_dominant)
         {
             // New dominant class - purge all other classes
             if (dominant_class_id_ != -1 && dominant_class_id_ != class_id)
             {
+                // Clean all other classes
                 for (auto it = class_queues_.begin(); it != class_queues_.end();)
                 {
                     if (it->first != class_id)
@@ -157,6 +169,8 @@ class TemporalObservationQueue
                     }
                 }
             }
+            
+            // Update dominance
             dominant_class_id_ = class_id;
             dominant_class_size_ = current_class_size;
         }
@@ -303,6 +317,21 @@ class TemporalObservationQueue
                 }
             }
         }
+        
+        if (dominant_class_id_ != -1)
+        {
+            auto it = class_queues_.find(dominant_class_id_);
+            if (it != class_queues_.end())
+            {
+                dominant_class_size_ = it->second.size();
+            }
+            else
+            {
+                // Protection: If for some reason the dominant class doesn't exist
+                dominant_class_id_ = -1;
+                dominant_class_size_ = 0;
+            }
+        }
     }
 };
 
@@ -387,18 +416,22 @@ class SegmentationTileMap {
          * @brief Adds an observation to the specified tile.
          * @param obs The observation to add.
          * @param idx The index of the tile.
+         * @param cost_params The cost parameters for this class.
          */
-        void pushObservation(TileObservation& obs, TileIndex& idx)
+        void pushObservation(TileObservation& obs, TileIndex& idx, const CostHeuristicParams& cost_params)
         {
             auto it = tile_map_.find(idx);
-            if (it != tile_map_.end()) {
-                // TileIndex exists, push the observation
-                it->second.push(obs);
-            } else {
+            if (it != tile_map_.end())
+            {
+                // TileIndex exists, push the observation with cost params
+                it->second.push(obs, cost_params);
+            }
+            else
+            {
                 // TileIndex does not exist, create a new TemporalObservationQueue with decay time
                 TemporalObservationQueue& queue = tile_map_[idx];
                 queue.setDecayTime(decay_time_);
-                queue.push(obs);
+                queue.push(obs, cost_params);
             }
         }
 
@@ -524,7 +557,7 @@ public:
             if (cost_it == nameToCostMap.end()) {
                 // This shouldn't happen because we already checked in createSegmentationCostMultimap
                 // but let's be extra safe
-                id_to_cost_[id] = CostHeuristicParams{0, 0, 0, 0};
+                id_to_cost_[id] = CostHeuristicParams{0, 0, 0, 0, false};
                 continue;
             }
             id_to_cost_[id] = cost_it->second;
@@ -552,7 +585,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = id_to_cost_.find(id);
         if (it == id_to_cost_.end()) {
-            return CostHeuristicParams{0, 0, 0, 0};
+            return CostHeuristicParams{0, 0, 0, 0, false};
         }
         return it->second;
     }
