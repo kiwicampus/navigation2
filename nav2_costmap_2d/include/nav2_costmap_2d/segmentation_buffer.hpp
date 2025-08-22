@@ -57,7 +57,7 @@ struct CostHeuristicParams
 {
     uint8_t base_cost, max_cost, mark_confidence;
     int samples_to_max_cost;
-    bool marking;
+    bool dominant_priority;
 };
 
 /**
@@ -126,7 +126,7 @@ class TemporalObservationQueue
     /**
      * @brief Adds an observation to the appropriate class queue, manages dominant class tracking.
      * @param tile_obs The observation to add.
-     * @param cost_params The cost parameters for this class (for marking logic).
+     * @param cost_params The cost parameters for this class (for dominant_priority logic).
      */
     void push(TileObservation tile_obs, const CostHeuristicParams& cost_params)
     {
@@ -143,10 +143,10 @@ class TemporalObservationQueue
         size_t current_class_size = queue.size();
         bool should_become_dominant = false;
         
-        if (cost_params.marking) {
+        if (cost_params.dominant_priority) {
             should_become_dominant = true;
         } else {
-            //logic for non-marking classes: only compete by size
+            //logic for non-dominant_priority classes: only compete by size
             should_become_dominant = (current_class_size > dominant_class_size_);
         }
         

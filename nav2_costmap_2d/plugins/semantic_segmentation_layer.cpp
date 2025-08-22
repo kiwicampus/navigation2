@@ -145,7 +145,7 @@ void SemanticSegmentationLayer::onInitialize()
       declareParameter(source + "." + class_type + ".max_cost", rclcpp::ParameterValue(0));
       declareParameter(source + "." + class_type + ".mark_confidence", rclcpp::ParameterValue(0));
       declareParameter(source + "." + class_type + ".samples_to_max_cost", rclcpp::ParameterValue(0));
-      declareParameter(source + "." + class_type + ".marking", rclcpp::ParameterValue(false));
+              declareParameter(source + "." + class_type + ".dominant_priority", rclcpp::ParameterValue(false));
       
       node->get_parameter(name_ + "." + source + "." + class_type + ".classes", classes_ids);
       if (classes_ids.empty())
@@ -158,7 +158,7 @@ void SemanticSegmentationLayer::onInitialize()
       node->get_parameter(name_ + "." + source + "." + class_type + ".max_cost", cost_params.max_cost);
       node->get_parameter(name_ + "." + source + "." + class_type + ".mark_confidence", cost_params.mark_confidence);
       node->get_parameter(name_ + "." + source + "." + class_type + ".samples_to_max_cost", cost_params.samples_to_max_cost);
-      node->get_parameter(name_ + "." + source + "." + class_type + ".marking", cost_params.marking);
+                   node->get_parameter(name_ + "." + source + "." + class_type + ".dominant_priority", cost_params.dominant_priority);
       
       for (auto& class_id : classes_ids)
       {
@@ -549,13 +549,13 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                   buffer->updateClassMap(class_name, cost_params);
                 }
               }
-              if (name == name_ + "." + source +  "." + class_type + ".marking") {
+              if (name == name_ + "." + source +  "." + class_type + ".dominant_priority") {
                 CostHeuristicParams cost_params;
                 std::vector<std::string> class_names_for_type;
                 node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
                 for(auto & class_name : class_names_for_type){
                   cost_params = buffer->getCostForClassName(class_name);
-                  cost_params.marking = parameter.as_bool();
+                  cost_params.dominant_priority = parameter.as_bool();
                   buffer->updateClassMap(class_name, cost_params);
                 }
               }
