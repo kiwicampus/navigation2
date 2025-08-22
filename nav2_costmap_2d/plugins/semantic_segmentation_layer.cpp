@@ -271,13 +271,36 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
   std::vector<std::pair<SegmentationTileMap::SharedPtr, SegmentationBuffer::SharedPtr>> segmentation_tile_maps;
   getSegmentationTileMaps(segmentation_tile_maps);
 
+  // Get current time for decay calculations
+  auto node = node_.lock();
+  if (!node) {
+    RCLCPP_ERROR(logger_, "Failed to lock node in updateBounds");
+    return;
+  }
+  double current_time = node->now().seconds();
+  
+  // Check if the current time is valid
+  if (current_time <= 0.0) {
+    RCLCPP_WARN(logger_, "Invalid current time in updateBounds: %.3f", current_time);
+    return;
+  }
+
   // Process each tile map one at a time
   for (auto& tile_map_pair : segmentation_tile_maps)
   {
     auto buffer = tile_map_pair.second;
     buffer->lock();
+    
+    // Purge old observations in updateBounds before computing costs to ensure the costmap accurately reflects the current state after decay, maintaining consistency between the buffer and the costmap.
+    tile_map_pair.first->purgeOldObservations(current_time);
+        
     for(auto& tile: *tile_map_pair.first)
     {
+      // Check if the tile has valid observations after purge
+      if (tile.second.empty()) {
+        continue;
+      }
+      
       TileWorldXY tile_world_coords = tile_map_pair.first->indexToWorld(tile.first.x, tile.first.y);
       TemporalObservationQueue& obs_queue = tile.second;      
       unsigned int mx, my;
