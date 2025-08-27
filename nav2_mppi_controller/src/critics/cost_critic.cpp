@@ -186,12 +186,12 @@ void CostCritic::score(CriticData & data)
       }
 
       // Let near-collision trajectory points be punished severely
-      // Note that we collision check based on the footprint actual,
-      // but score based on the center-point cost regardless
-      if (pose_cost >= static_cast<float>(near_collision_cost_)) {
+      // Use footprint-aware cost for threshold when consider_footprint_ is true
+      float threshold_cost = getThresholdCost(Tx, Ty, traj_yaw(i, j));
+      if (threshold_cost >= static_cast<float>(near_collision_cost_)) {
         traj_cost += critical_cost_;
       } else if (!near_goal) {  // Generally prefer trajectories further from obstacles
-        traj_cost += pose_cost;
+        traj_cost += pose_cost;  // Keep using center-point cost for progressive penalties
       }
     }
 
