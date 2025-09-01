@@ -113,6 +113,7 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "min_obstacle_distance", rclcpp::ParameterValue(0.3));
     declareParameter(source + "." + "tile_map_decay_time", rclcpp::ParameterValue(5.0));
     declareParameter(source + "." + "visualize_tile_map", rclcpp::ParameterValue(false));
+    declareParameter(source + "." + "use_cost_selection", rclcpp::ParameterValue(true));
     
     node->get_parameter(name_ + "." + source + "." + "segmentation_topic", segmentation_topic);
     node->get_parameter(name_ + "." + source + "." + "confidence_topic", confidence_topic);
@@ -126,6 +127,8 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + source + "." + "min_obstacle_distance", min_obstacle_distance);
     node->get_parameter(name_ + "." + source + "." + "tile_map_decay_time", tile_map_decay_time);
     node->get_parameter(name_ + "." + source + "." + "visualize_tile_map", visualize_tile_map);
+    bool use_cost_selection = true;
+    node->get_parameter(name_ + "." + source + "." + "use_cost_selection", use_cost_selection);
     if (class_types_string.empty())
     {
       RCLCPP_ERROR(logger_, "no class types defined for source %s. Segmentation plugin cannot work this way", source.c_str());
@@ -142,6 +145,7 @@ void SemanticSegmentationLayer::onInitialize()
       declareParameter(source + "." + class_type + ".max_cost", rclcpp::ParameterValue(0));
       declareParameter(source + "." + class_type + ".mark_confidence", rclcpp::ParameterValue(0));
       declareParameter(source + "." + class_type + ".samples_to_max_cost", rclcpp::ParameterValue(0));
+              declareParameter(source + "." + class_type + ".dominant_priority", rclcpp::ParameterValue(false));
       
       node->get_parameter(name_ + "." + source + "." + class_type + ".classes", classes_ids);
       if (classes_ids.empty())
@@ -154,6 +158,8 @@ void SemanticSegmentationLayer::onInitialize()
       node->get_parameter(name_ + "." + source + "." + class_type + ".max_cost", cost_params.max_cost);
       node->get_parameter(name_ + "." + source + "." + class_type + ".mark_confidence", cost_params.mark_confidence);
       node->get_parameter(name_ + "." + source + "." + class_type + ".samples_to_max_cost", cost_params.samples_to_max_cost);
+                   node->get_parameter(name_ + "." + source + "." + class_type + ".dominant_priority", cost_params.dominant_priority);
+      
       for (auto& class_id : classes_ids)
       {
         class_map.insert(std::pair<std::string, CostHeuristicParams>(class_id, cost_params));
@@ -184,7 +190,8 @@ void SemanticSegmentationLayer::onInitialize()
     auto segmentation_buffer = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
       node, source, class_types_string, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
       min_obstacle_distance, *tf_, global_frame_, sensor_frame,
-      tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map);
+      tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map,
+      use_cost_selection);
 
     segmentation_buffers_.push_back(segmentation_buffer);
     
@@ -264,15 +271,38 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
   std::vector<std::pair<SegmentationTileMap::SharedPtr, SegmentationBuffer::SharedPtr>> segmentation_tile_maps;
   getSegmentationTileMaps(segmentation_tile_maps);
 
+  // Get current time for decay calculations
+  auto node = node_.lock();
+  if (!node) {
+    RCLCPP_ERROR(logger_, "Failed to lock node in updateBounds");
+    return;
+  }
+  double current_time = node->now().seconds();
+  
+  // Check if the current time is valid
+  if (current_time <= 0.0) {
+    RCLCPP_WARN(logger_, "Invalid current time in updateBounds: %.3f", current_time);
+    return;
+  }
+
   // Process each tile map one at a time
   for (auto& tile_map_pair : segmentation_tile_maps)
   {
     auto buffer = tile_map_pair.second;
     buffer->lock();
+    
+    // Purge old observations in updateBounds before computing costs to ensure the costmap accurately reflects the current state after decay, maintaining consistency between the buffer and the costmap.
+    tile_map_pair.first->purgeOldObservations(current_time);
+        
     for(auto& tile: *tile_map_pair.first)
     {
+      // Check if the tile has valid observations after purge
+      if (tile.second.empty()) {
+        continue;
+      }
+      
       TileWorldXY tile_world_coords = tile_map_pair.first->indexToWorld(tile.first.x, tile.first.y);
-      TemporalObservationQueue& obs_queue = tile.second;
+      TemporalObservationQueue& obs_queue = tile.second;      
       unsigned int mx, my;
       if (!worldToMap(tile_world_coords.x, tile_world_coords.y, mx, my))
       {
@@ -281,7 +311,7 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
       }
       unsigned int index = getIndex(mx, my);
       CostHeuristicParams cost_params = buffer->getCostForClassId(obs_queue.getClassId());
-      if(obs_queue.size() >= cost_params.samples_to_max_cost && 
+      if(static_cast<int>(obs_queue.size()) >= cost_params.samples_to_max_cost && 
          obs_queue.getConfidenceSum() / obs_queue.size() > cost_params.mark_confidence)
       {
         costmap_[index] = cost_params.max_cost;
@@ -516,6 +546,16 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                 for(auto & class_name : class_names_for_type){
                   cost_params = buffer->getCostForClassName(class_name);
                   cost_params.samples_to_max_cost = parameter.as_int();
+                  buffer->updateClassMap(class_name, cost_params);
+                }
+              }
+              if (name == name_ + "." + source +  "." + class_type + ".dominant_priority") {
+                CostHeuristicParams cost_params;
+                std::vector<std::string> class_names_for_type;
+                node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
+                for(auto & class_name : class_names_for_type){
+                  cost_params = buffer->getCostForClassName(class_name);
+                  cost_params.dominant_priority = parameter.as_bool();
                   buffer->updateClassMap(class_name, cost_params);
                 }
               }

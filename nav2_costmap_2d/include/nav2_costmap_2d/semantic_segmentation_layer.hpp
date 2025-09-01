@@ -79,7 +79,10 @@ class SemanticSegmentationLayer : public CostmapLayer
      */
     virtual void onInitialize();
     /**
-     * @brief Update the bounds of the master costmap by this layer's update dimensions
+     * @brief Update the bounds of the master costmap by this layer's update dimensions. 
+     * This method includes temporal consistency by purging old observations
+     * before calculating costs, ensuring the costmap reflects the current state
+     * after decay time has been applied.
      * @param robot_x X pose of robot
      * @param robot_y Y pose of robot
      * @param robot_yaw Robot orientation
