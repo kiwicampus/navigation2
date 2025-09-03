@@ -126,9 +126,9 @@ class TemporalObservationQueue
     /**
      * @brief Adds an observation to the appropriate class queue, manages dominant class tracking.
      * @param tile_obs The observation to add.
-     * @param cost_params The cost parameters for this class (for dominant_priority logic).
+     * @param dominant_priority Whether this class should take immediate dominance when observed.
      */
-    void push(TileObservation tile_obs, const CostHeuristicParams& cost_params)
+    void push(TileObservation tile_obs, bool dominant_priority = false)
     {
         uint8_t class_id = tile_obs.class_id;
         
@@ -143,7 +143,7 @@ class TemporalObservationQueue
         size_t current_class_size = queue.size();
         bool should_become_dominant = false;
         
-        if (cost_params.dominant_priority) {
+        if (dominant_priority) {
             should_become_dominant = true;
         } else {
             //logic for non-dominant_priority classes: only compete by size
@@ -155,55 +155,11 @@ class TemporalObservationQueue
             // New dominant class - purge all other classes
             if (dominant_class_id_ != -1 && dominant_class_id_ != class_id)
             {
-                // Clean all other classes
-                for (auto it = class_queues_.begin(); it != class_queues_.end();)
-                {
-                    if (it->first != class_id)
-                    {
-                        class_confidence_sums_.erase(it->first);
-                        it = class_queues_.erase(it);
-                    }
-                    else
-                    {
-                        ++it;
-                    }
-                }
+                clearQueuesExcept(class_id);
             }
             
             // Update dominance
-            dominant_class_id_ = class_id;
-            dominant_class_size_ = current_class_size;
-        }
-    }
-
-    /**
-     * @brief Removes the oldest observation from the dominant class queue.
-     */
-    void pop()
-    {
-        if (dominant_class_id_ != -1 && !class_queues_[dominant_class_id_].empty())
-        {
-            auto& dominant_queue = class_queues_[dominant_class_id_];
-            class_confidence_sums_[dominant_class_id_] -= dominant_queue.front().confidence;
-            dominant_queue.pop_front();
-            dominant_class_size_--;
-            
-            // If dominant queue is now empty, find new dominant class
-            if (dominant_class_size_ == 0)
-            {
-                dominant_class_id_ = -1;
-                dominant_class_size_ = 0;
-                
-                // Find new dominant class among remaining queues
-                for (const auto& pair : class_queues_)
-                {
-                    if (pair.second.size() > dominant_class_size_)
-                    {
-                        dominant_class_id_ = pair.first;
-                        dominant_class_size_ = pair.second.size();
-                    }
-                }
-            }
+            setDominant(class_id, current_class_size);
         }
     }
 
@@ -267,13 +223,19 @@ class TemporalObservationQueue
      */
     void purgeOld(double current_time)
     {
-        std::vector<uint8_t> classes_to_remove;
-        
-        for (auto& class_pair : class_queues_)
+        // Iterate through all class queues and remove time-expired observations.
+        // While doing so, maintain the running confidence sums and remove classes
+        // whose queues become empty to preserve the invariant: if a class exists
+        // in class_queues_, its queue size is >= 1.
+        bool dominant_removed = false;
+
+        for (auto it = class_queues_.begin(); it != class_queues_.end(); )
         {
-            uint8_t class_id = class_pair.first;
-            auto& queue = class_pair.second;
-            
+            auto& queue = it->second;
+            const uint8_t class_id = it->first;
+        
+            // Pop observations older than decay_time_ from the front (oldest first),
+            // updating the confidence sum accordingly.
             while (!queue.empty())
             {
                 double age = current_time - queue.front().timestamp;
@@ -287,51 +249,87 @@ class TemporalObservationQueue
                     break;
                 }
             }
-            
-            // Mark empty classes for removal
+        
+            // If the queue ended up empty, erase the class entry entirely to avoid
+            // keeping "zombie" keys and to keep class_queues_ and class_confidence_sums_
+            // in sync. Track if the dominant class was removed to recompute dominance later.
             if (queue.empty())
             {
-                classes_to_remove.push_back(class_id);
-            }
-        }
-        
-        // Remove empty classes and update dominant class if necessary
-        for (uint8_t class_id : classes_to_remove)
-        {
-            class_queues_.erase(class_id);
-            class_confidence_sums_.erase(class_id);
-            
-            // If we removed the dominant class, find new dominant
-            if (dominant_class_id_ == class_id)
-            {
-                dominant_class_id_ = -1;
-                dominant_class_size_ = 0;
-                
-                for (const auto& pair : class_queues_)
-                {
-                    if (pair.second.size() > dominant_class_size_)
-                    {
-                        dominant_class_id_ = pair.first;
-                        dominant_class_size_ = pair.second.size();
-                    }
-                }
-            }
-        }
-        
-        if (dominant_class_id_ != -1)
-        {
-            auto it = class_queues_.find(dominant_class_id_);
-            if (it != class_queues_.end())
-            {
-                dominant_class_size_ = it->second.size();
+                if (class_id == dominant_class_id_) dominant_removed = true;
+                class_confidence_sums_.erase(class_id);
+                it = class_queues_.erase(it);
             }
             else
             {
-                // Protection: If for some reason the dominant class doesn't exist
-                dominant_class_id_ = -1;
-                dominant_class_size_ = 0;
+                ++it;
             }
         }
+        
+        // Update dominant class bookkeeping:
+        // - If the dominant class was removed, scan to find the new dominant.
+        // - Otherwise, just refresh the dominant_class_size_ if it still exists;
+        //   if not found (edge case), reset dominance.
+        if (dominant_removed) {
+            recomputeDominant();
+        } else if (dominant_class_id_ != -1) {
+            auto it = class_queues_.find(dominant_class_id_);
+            if (it != class_queues_.end()) setDominant(dominant_class_id_, it->second.size());
+            else resetDominant();
+        }
+    }
+
+private:
+    /**
+     * @brief Removes all class queues and confidence sums except the specified class.
+     * @param keep_class_id The class ID to preserve.
+     */
+    void clearQueuesExcept(uint8_t keep_class_id)
+    {
+        for (auto it = class_queues_.begin(); it != class_queues_.end();)
+        {
+            if (it->first != keep_class_id)
+            {
+                class_confidence_sums_.erase(it->first);
+                it = class_queues_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
+    /**
+     * @brief Recomputes dominant_class_id_ and dominant_class_size_ by scanning class_queues_.
+     */
+    void recomputeDominant()
+    {
+        resetDominant();
+        for (const auto& pair : class_queues_)
+        {
+            if (pair.second.size() > dominant_class_size_)
+            {
+                setDominant(pair.first, pair.second.size());
+            }
+        }
+    }
+
+    /**
+     * @brief Resets the dominant class state to none.
+     */
+    void resetDominant()
+    {
+        dominant_class_id_ = -1;
+        dominant_class_size_ = 0;
+    }
+
+    /**
+     * @brief Sets the dominant class and its current size.
+     */
+    void setDominant(uint8_t class_id, size_t size)
+    {
+        dominant_class_id_ = class_id;
+        dominant_class_size_ = size;
     }
 };
 
@@ -416,22 +414,22 @@ class SegmentationTileMap {
          * @brief Adds an observation to the specified tile.
          * @param obs The observation to add.
          * @param idx The index of the tile.
-         * @param cost_params The cost parameters for this class.
+         * @param dominant_priority Whether this class should take immediate dominance when observed.
          */
-        void pushObservation(TileObservation& obs, TileIndex& idx, const CostHeuristicParams& cost_params)
+        void pushObservation(TileObservation& obs, TileIndex& idx, bool dominant_priority = false)
         {
             auto it = tile_map_.find(idx);
             if (it != tile_map_.end())
             {
-                // TileIndex exists, push the observation with cost params
-                it->second.push(obs, cost_params);
+                // TileIndex exists, push the observation with dominance flag
+                it->second.push(obs, dominant_priority);
             }
             else
             {
                 // TileIndex does not exist, create a new TemporalObservationQueue with decay time
                 TemporalObservationQueue& queue = tile_map_[idx];
                 queue.setDecayTime(decay_time_);
-                queue.push(obs, cost_params);
+                queue.push(obs, dominant_priority);
             }
         }
 
@@ -789,3 +787,4 @@ class SegmentationBuffer
 };
 }  // namespace nav2_costmap_2d
 #endif  // NAV2_COSTMAP_2D__SEGMENTATION_BUFFER_HPP_
+
