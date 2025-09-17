@@ -16,7 +16,7 @@
 import math
 
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist, TwistStamped
-from geometry_msgs.msg import Quaternion, TransformStamped, Vector3
+from geometry_msgs.msg import Quaternion, TransformStamped, Vector3, Transform
 from nav2_simple_commander.line_iterator import LineIterator
 from nav_msgs.msg import Odometry
 from nav_msgs.srv import GetMap
@@ -100,6 +100,9 @@ class LoopbackSimulator(Node):
         self.initial_pose_sub = self.create_subscription(
             PoseWithCovarianceStamped,
             'initialpose', self.initialPoseCallback, 10)
+        self.initial_pose_odom_sub = self.create_subscription(
+            PoseWithCovarianceStamped,
+            'initialpose_odom', self.initialPoseOdomCallback, 10)
         if not use_stamped:
             self.cmd_vel_sub = self.create_subscription(
                 Twist,
@@ -206,6 +209,30 @@ class LoopbackSimulator(Node):
         mat_map_to_odom = \
             tf_transformations.concatenate_matrices(mat_map_to_base_link, mat_base_link_to_odom)
         self.t_map_to_odom.transform = matrixToTransform(mat_map_to_odom)
+
+    def initialPoseOdomCallback(self, msg):
+        self.info('Received initial pose for odom->base_link!')
+        # Set odom->base_link transform directly from the received pose
+        self.t_odom_to_base_link.transform.translation.x = msg.pose.pose.position.x
+        self.t_odom_to_base_link.transform.translation.y = msg.pose.pose.position.y
+        self.t_odom_to_base_link.transform.translation.z = 0.0
+        self.t_odom_to_base_link.transform.rotation = msg.pose.pose.orientation
+        
+        # If this is the first pose received, initialize the system
+        if self.initial_pose is None:
+            self.initial_pose = msg.pose.pose
+            # Initialize map->odom as identity
+            self.t_map_to_odom.transform.translation = Vector3()
+            self.t_map_to_odom.transform.rotation = Quaternion()
+            self.publishTransforms(self.t_map_to_odom, self.t_odom_to_base_link)
+
+            # Start republication timer and velocity processing
+            if self.setupTimer is not None:
+                self.setupTimer.cancel()
+                self.setupTimer.destroy()
+                self.setupTimer = None
+            self.timer = self.create_timer(self.update_dur, self.timerCallback)
+            self.timer_laser = self.create_timer(self.scan_publish_dur, self.publishLaserScan)
 
     def timerCallback(self):
         # If no data, just republish existing transforms without change

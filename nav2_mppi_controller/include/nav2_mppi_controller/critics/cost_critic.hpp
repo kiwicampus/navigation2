@@ -87,7 +87,7 @@ protected:
     * @param theta theta of pose
     * @return float cost value for threshold comparison
     */
-  inline float getThresholdCost(float x, float y, float theta)
+  inline float getPoseCost(float x, float y, float theta)
   {
     if (consider_footprint_) {
       // Use footprint cost for threshold when footprint checking is enabled
@@ -169,6 +169,7 @@ protected:
   std::string inflation_layer_name_;
 
   unsigned int power_{0};
+  bool legacy_near_collision_cost_check{false};
 };
 
 }  // namespace mppi::critics
