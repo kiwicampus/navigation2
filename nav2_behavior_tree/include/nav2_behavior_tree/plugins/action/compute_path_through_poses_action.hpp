@@ -83,6 +83,9 @@ public:
         BT::InputPort<std::string>(
           "planner_id", "",
           "Mapped name to the planner plugin type to use"),
+        BT::InputPort<bool>(
+          "allow_partial_paths", false,
+          "If true, allow partial path planning to last reachable pose when obstacles block later goals"),
         BT::OutputPort<nav_msgs::msg::Path>("path", "Path created by ComputePathThroughPoses node"),
         BT::OutputPort<ActionResult::_error_code_type>(
           "error_code_id", "The compute path through poses error code"),

@@ -3,6 +3,7 @@ geometry_msgs/PoseStamped[] goals
 geometry_msgs/PoseStamped start
 string planner_id
 bool use_start # If false, use current robot pose as path start, if true, use start above instead
+bool allow_partial_paths # If true, allow partial path planning to last reachable pose when obstacles block later goals
 ---
 #result definition
 
