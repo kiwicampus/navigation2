@@ -37,9 +37,6 @@ void ComputePathThroughPosesAction::on_tick()
     goal_.use_start = true;
   }
   getInput("allow_partial_paths", goal_.allow_partial_paths);
-  
-  // Debug logging
-  RCLCPP_INFO(node_->get_logger(), "[BT DEBUG] allow_partial_paths = %s", goal_.allow_partial_paths ? "true" : "false");
 }
 
 BT::NodeStatus ComputePathThroughPosesAction::on_success()

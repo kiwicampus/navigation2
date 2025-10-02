@@ -383,9 +383,6 @@ void PlannerServer::computePlanThroughPoses()
   auto result = std::make_shared<ActionThroughPoses::Result>();
   nav_msgs::msg::Path concat_path;
 
-  // Debug logging for partial path planning
-  RCLCPP_INFO(get_logger(), "[DEBUG] allow_partial_paths = %s", goal->allow_partial_paths ? "true" : "false");
-
   geometry_msgs::msg::PoseStamped curr_start, curr_goal;
 
   try {
@@ -407,8 +404,6 @@ void PlannerServer::computePlanThroughPoses()
       throw nav2_core::PlannerTFError("Unable to get start pose");
     }
 
-
-    RCLCPP_INFO(get_logger(), "[DEBUG] all goals = %ld", goal->goals.size());
     auto cancel_checker = [this]() {
         return action_server_poses_->is_cancel_requested();
       };
@@ -425,8 +420,7 @@ void PlannerServer::computePlanThroughPoses()
         curr_start.header = concat_path.header;
       }
       curr_goal = goal->goals[i];
-      RCLCPP_INFO(get_logger(), "[DEBUG] curr_start = (%.2f, %.2f)", curr_start.pose.position.x, curr_start.pose.position.y);
-      RCLCPP_INFO(get_logger(), "[DEBUG] curr_goal = (%.2f, %.2f)", curr_goal.pose.position.x, curr_goal.pose.position.y);
+
       // Transform them into the global frame
       if (!transformPosesToGlobalFrame(curr_start, curr_goal)) {
         throw nav2_core::PlannerTFError("Unable to transform poses to global frame");
@@ -436,7 +430,7 @@ void PlannerServer::computePlanThroughPoses()
       nav_msgs::msg::Path curr_path;
       try {
         curr_path = getPlan(curr_start, curr_goal, goal->planner_id, cancel_checker);
-      } catch (nav2_core::NoValidPathCouldBeFound & ex) {
+      } catch (nav2_core::NoValidPathCouldBeFound &) {
         // Handle planning failure with partial path support
         if (goal->allow_partial_paths && i > 0) {
           RCLCPP_WARN(
@@ -448,17 +442,12 @@ void PlannerServer::computePlanThroughPoses()
           break;
         } else {
           // Original behavior: fail immediately if partial path planning is disabled or on the first goal
-          RCLCPP_ERROR(
-            get_logger(), 
-            "[Partial Path Planning] Failed to plan to goal %d at (%.2f, %.2f). No valid path could be found.",
-            i, curr_goal.pose.position.x, curr_goal.pose.position.y);
           throw; // Re-throw the exception
         }
       }
 
-      // Check if path is valid (this should not be needed now since we catch exceptions above)
       if (!validatePath<ActionThroughPoses>(curr_goal, curr_path, goal->planner_id)) {
-          throw nav2_core::NoValidPathCouldBeFound(goal->planner_id + " generated an invalid path");
+        throw nav2_core::NoValidPathCouldBeFound(goal->planner_id + " generated an invalid path");
       }
 
       // Concatenate paths together
@@ -527,6 +516,7 @@ void PlannerServer::computePlanThroughPoses()
     action_server_poses_->terminate_current(result);
   }
 }
+
 void
 PlannerServer::computePlan()
 {
