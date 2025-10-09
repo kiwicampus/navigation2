@@ -36,11 +36,13 @@ void ComputePathThroughPosesAction::on_tick()
   if (getInput("start", goal_.start)) {
     goal_.use_start = true;
   }
+  getInput("allow_partial_paths", goal_.allow_partial_paths);
 }
 
 BT::NodeStatus ComputePathThroughPosesAction::on_success()
 {
   setOutput("path", result_.result->path);
+  setOutput("blocked_poses", result_.result->blocked_poses);
   // Set empty error code, action was successful
   setOutput("error_code_id", ActionResult::NONE);
   return BT::NodeStatus::SUCCESS;
@@ -49,7 +51,9 @@ BT::NodeStatus ComputePathThroughPosesAction::on_success()
 BT::NodeStatus ComputePathThroughPosesAction::on_aborted()
 {
   nav_msgs::msg::Path empty_path;
+  std::vector<geometry_msgs::msg::PoseStamped> empty_blocked_poses;
   setOutput("path", empty_path);
+  setOutput("blocked_poses", empty_blocked_poses);
   setOutput("error_code_id", result_.result->error_code);
   return BT::NodeStatus::FAILURE;
 }
@@ -57,7 +61,9 @@ BT::NodeStatus ComputePathThroughPosesAction::on_aborted()
 BT::NodeStatus ComputePathThroughPosesAction::on_cancelled()
 {
   nav_msgs::msg::Path empty_path;
+  std::vector<geometry_msgs::msg::PoseStamped> empty_blocked_poses;
   setOutput("path", empty_path);
+  setOutput("blocked_poses", empty_blocked_poses);
   // Set empty error code, action was cancelled
   setOutput("error_code_id", ActionResult::NONE);
   return BT::NodeStatus::SUCCESS;
