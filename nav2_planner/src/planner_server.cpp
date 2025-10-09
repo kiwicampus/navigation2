@@ -382,6 +382,9 @@ void PlannerServer::computePlanThroughPoses()
   auto goal = action_server_poses_->get_current_goal();
   auto result = std::make_shared<ActionThroughPoses::Result>();
   nav_msgs::msg::Path concat_path;
+  
+  // Initialize blocked_poses vector to store dismissed poses
+  result->blocked_poses.clear();
 
   geometry_msgs::msg::PoseStamped curr_start, curr_goal;
 
@@ -427,12 +430,37 @@ void PlannerServer::computePlanThroughPoses()
       }
 
       // Get plan from start -> goal
-      nav_msgs::msg::Path curr_path = getPlan(
-        curr_start, curr_goal, goal->planner_id,
-        cancel_checker);
+      nav_msgs::msg::Path curr_path;
+      try {
+        curr_path = getPlan(curr_start, curr_goal, goal->planner_id, cancel_checker);
+      } catch (nav2_core::NoValidPathCouldBeFound &) {
+        // Handle planning failure with partial path support
+        if (goal->allow_partial_paths && i > 0) {
+          RCLCPP_WARN(
+            get_logger(), 
+            "Failed to plan to goal %d at (%.2f, %.2f). Continuing with partial path to last reachable pose.",
+            i, curr_goal.pose.position.x, curr_goal.pose.position.y);
+          
+          // Collect all remaining poses (from current index to end) as trimmed poses
+          for (unsigned int j = i; j < goal->goals.size(); j++) {
+            result->blocked_poses.push_back(goal->goals[j]);
+          }
+          
+          RCLCPP_INFO(
+            get_logger(),
+            "Added %zu poses to blocked_poses due to obstacle blocking",
+            result->blocked_poses.size());
+          
+          // Break out of the loop and return partial path
+          break;
+        } else {
+          // Original behavior: fail immediately if partial path planning is disabled or on the first goal
+          throw; // Re-throw the exception
+        }
+      }
 
       if (!validatePath<ActionThroughPoses>(curr_goal, curr_path, goal->planner_id)) {
-        throw nav2_core::NoValidPathCouldBeFound(goal->planner_id + " generated a empty path");
+        throw nav2_core::NoValidPathCouldBeFound(goal->planner_id + " generated an invalid path");
       }
 
       // Concatenate paths together
