@@ -25,5 +25,6 @@ nav_msgs/Path path
 builtin_interfaces/Duration planning_time
 uint16 error_code
 string error_msg
+geometry_msgs/PoseStamped[] blocked_poses # Poses that were dismissed due to obstacles when allow_partial_paths is true
 ---
 #feedback definition

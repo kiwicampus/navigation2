@@ -89,6 +89,8 @@ public:
         BT::OutputPort<nav_msgs::msg::Path>("path", "Path created by ComputePathThroughPoses node"),
         BT::OutputPort<ActionResult::_error_code_type>(
           "error_code_id", "The compute path through poses error code"),
+        BT::OutputPort<std::vector<geometry_msgs::msg::PoseStamped>>(
+          "blocked_poses", "Poses that were dismissed due to obstacles when allow_partial_paths is true"),
       });
   }
 };

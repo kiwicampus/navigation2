@@ -382,6 +382,9 @@ void PlannerServer::computePlanThroughPoses()
   auto goal = action_server_poses_->get_current_goal();
   auto result = std::make_shared<ActionThroughPoses::Result>();
   nav_msgs::msg::Path concat_path;
+  
+  // Initialize blocked_poses vector to store dismissed poses
+  result->blocked_poses.clear();
 
   geometry_msgs::msg::PoseStamped curr_start, curr_goal;
 
@@ -437,6 +440,16 @@ void PlannerServer::computePlanThroughPoses()
             get_logger(), 
             "Failed to plan to goal %d at (%.2f, %.2f). Continuing with partial path to last reachable pose.",
             i, curr_goal.pose.position.x, curr_goal.pose.position.y);
+          
+          // Collect all remaining poses (from current index to end) as trimmed poses
+          for (unsigned int j = i; j < goal->goals.size(); j++) {
+            result->blocked_poses.push_back(goal->goals[j]);
+          }
+          
+          RCLCPP_INFO(
+            get_logger(),
+            "Added %zu poses to blocked_poses due to obstacle blocking",
+            result->blocked_poses.size());
           
           // Break out of the loop and return partial path
           break;
