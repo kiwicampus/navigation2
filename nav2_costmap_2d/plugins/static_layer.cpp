@@ -112,7 +112,7 @@ StaticLayer::activate()
     throw std::runtime_error{"Failed to lock node"};
   }
 
-  // Restore callback for dynamic parameters
+  // Restore callback for dynamic parameters.
   dyn_params_handler_ = node->add_on_set_parameters_callback(
     std::bind(
       &StaticLayer::dynamicParametersCallback,
