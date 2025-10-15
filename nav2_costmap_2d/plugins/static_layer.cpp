@@ -107,6 +107,33 @@ StaticLayer::onInitialize()
 void
 StaticLayer::activate()
 {
+  auto node = node_.lock();
+  if (!node) {
+    throw std::runtime_error{"Failed to lock node"};
+  }
+
+  // Restore callback for dynamic parameters
+  dyn_params_handler_ = node->add_on_set_parameters_callback(
+    std::bind(
+      &StaticLayer::dynamicParametersCallback,
+      this, std::placeholders::_1));
+
+  // Always enable the static layer on activation to ensure map is shown
+  if (!enabled_) {
+    RCLCPP_INFO(logger_, "Enabling static layer on activation");
+    enabled_ = true;
+    
+    // Update the parameter to keep it consistent
+    auto param = rclcpp::Parameter(name_ + "." + "enabled", enabled_);
+    node->set_parameter(param);
+    
+    // Mark data as updated to trigger map repaint
+    x_ = y_ = 0;
+    width_ = size_x_;
+    height_ = size_y_;
+    has_updated_data_ = true;
+    current_ = false;
+  }
 }
 
 void
@@ -496,9 +523,7 @@ StaticLayer::dynamicParametersCallback(
         height_ = size_y_;
         has_updated_data_ = true;
         current_ = false;
-      }
-    } else if (param_type == ParameterType::PARAMETER_BOOL) {
-      if (param_name == name_ + "." + "footprint_clearing_enabled") {
+      } else if (param_name == name_ + "." + "footprint_clearing_enabled") {
         footprint_clearing_enabled_ = parameter.as_bool();
       }
     }
