@@ -118,7 +118,7 @@ StaticLayer::activate()
       &StaticLayer::dynamicParametersCallback,
       this, std::placeholders::_1));
 
-  // Always enable the static layer on activation to ensure map is shown
+  // Always enable the static layer on activation to ensure map is shown.
   if (!enabled_) {
     RCLCPP_INFO(logger_, "Enabling static layer on activation");
     enabled_ = true;
