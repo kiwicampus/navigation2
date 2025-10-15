@@ -123,7 +123,7 @@ StaticLayer::activate()
     RCLCPP_INFO(logger_, "Enabling static layer on activation");
     enabled_ = true;
     
-    // Update the parameter to keep it consistent
+    // Update the parameter to keep it consistent.
     auto param = rclcpp::Parameter(name_ + "." + "enabled", enabled_);
     node->set_parameter(param);
     
