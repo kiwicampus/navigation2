@@ -53,7 +53,8 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
                                        double expected_update_rate, double max_lookahead_distance,
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
-                                       tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map)
+                                       tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map,
+                                       bool use_cost_selection)
   : tf2_buffer_(tf2_buffer)
   , class_types_(class_types)
   , class_names_cost_map_(class_names_cost_map)
@@ -72,6 +73,10 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   last_updated_ = node->now();
   temporal_tile_map_ = std::make_shared<SegmentationTileMap>(costmap_resolution, tile_map_decay_time);
   visualize_tile_map_ = visualize_tile_map;
+  use_cost_selection_ = use_cost_selection;
+  RCLCPP_INFO(logger_, "SegmentationBuffer [%s]: Selection method = %s", 
+              buffer_source_.c_str(), 
+              use_cost_selection_ ? "COST-BASED (max_cost)" : "CONFIDENCE-BASED");
   if(visualize_tile_map_)
   {
     tile_map_pub_ = node->create_publisher<sensor_msgs::msg::PointCloud2>(buffer_source + "/tile_map",1);
@@ -159,19 +164,29 @@ void SegmentationBuffer::bufferSegmentation(
 
         TileIndex costmap_index = temporal_tile_map_->worldToIndex(*iter_x_global, *iter_y_global);
 
-        // Find the observation with the greater confidence for each tile
+        // Selection policy per tile: cost-based (max_cost) or confidence-based
         auto it = best_observations_idxs.find(costmap_index);
-        // if an observation already exists in the index, compare its confidence to the current
-        // one and if its greater store this element as the new best confidence index for the tile
         if (it != best_observations_idxs.end()) {
-          if(confidence.data[pixel_idx] > confidence.data[best_observations_idxs[costmap_index]])
-          {
-            best_observations_idxs[costmap_index] = pixel_idx;
+          if (use_cost_selection_) {
+            // Cost-based: pick highest max_cost
+            uint8_t current_class = segmentation.data[pixel_idx];
+            uint8_t existing_class = segmentation.data[it->second];
+            auto current_cost = segmentation_cost_multimap_->getCostById(current_class);
+            auto existing_cost = segmentation_cost_multimap_->getCostById(existing_class);
+            if (current_cost.max_cost > existing_cost.max_cost) {
+              best_observations_idxs[costmap_index] = pixel_idx;
+              RCLCPP_DEBUG(logger_, "COST-BASED: Replaced tile observation - current_class=%d (max_cost=%d) > existing_class=%d (max_cost=%d)", 
+                          current_class, current_cost.max_cost, existing_class, existing_cost.max_cost);
+            }
+          } else {
+            // Confidence-based: pick highest confidence
+            if (confidence.data[pixel_idx] > confidence.data[it->second]) {
+              best_observations_idxs[costmap_index] = pixel_idx;
+              RCLCPP_DEBUG(logger_, "CONFIDENCE-BASED: Replaced tile observation - current_confidence=%d > existing_confidence=%d", 
+                          confidence.data[pixel_idx], confidence.data[it->second]);
+            }
           }
-        }
-        // if this is the first observation for the tile index just store its confidence as the best one
-        else
-        {
+        } else {
           best_observations_idxs[costmap_index] = pixel_idx;
         }
         ++iter_x_global;
@@ -187,8 +202,17 @@ void SegmentationBuffer::bufferSegmentation(
     {
       int img_idx_for_best_obs = idx.second;
       TileIndex costmap_index = idx.first;
-      TileObservation best_obs{segmentation.data[img_idx_for_best_obs], static_cast<float>(confidence.data[img_idx_for_best_obs]), cloud_time_seconds};
-      temporal_tile_map_->pushObservation(best_obs, costmap_index);
+      uint8_t class_id = segmentation.data[img_idx_for_best_obs];
+      
+      // Only process observations with defined class IDs
+      if (segmentation_cost_multimap_->hasClassId(class_id)) {
+        TileObservation best_obs{class_id, static_cast<float>(confidence.data[img_idx_for_best_obs]), cloud_time_seconds};
+        bool dominant_priority = segmentation_cost_multimap_->getCostById(class_id).dominant_priority;
+        temporal_tile_map_->pushObservation(best_obs, costmap_index, dominant_priority);
+      } else {
+        RCLCPP_DEBUG(logger_, "SegmentationBuffer [%s]: Skipping undefined class_id %d in tile (%d, %d)", 
+                      buffer_source_.c_str(), class_id, costmap_index.x, costmap_index.y);
+      }
     }
     temporal_tile_map_->unlock();
 
