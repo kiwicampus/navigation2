@@ -92,6 +92,7 @@
       <input_port name="planner_id">Mapped name to the planner plugin type to use</input_port>
       <output_port name="path">Path created by ComputePathToPose node</output_port>
       <output_port name="error_code_id">"Compute path through poses error code"</output_port>
+      <input_port name="allow_partial_paths">Allow partial paths</input_port>
     </Action>
 
     <Action ID="RemovePassedGoals">
