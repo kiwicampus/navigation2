@@ -32,6 +32,7 @@ namespace mppi
 void Optimizer::initialize(
   rclcpp_lifecycle::LifecycleNode::WeakPtr parent, const std::string & name,
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros,
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer,
   ParametersHandler * param_handler)
 {
   parent_ = parent;
@@ -39,6 +40,7 @@ void Optimizer::initialize(
   costmap_ros_ = costmap_ros;
   costmap_ = costmap_ros_->getCostmap();
   parameters_handler_ = param_handler;
+  tf_buffer_ = tf_buffer;
 
   auto node = parent_.lock();
   logger_ = node->get_logger();
@@ -46,7 +48,8 @@ void Optimizer::initialize(
   getParams();
 
   critic_manager_.on_configure(parent_, name_, costmap_ros_, parameters_handler_);
-  noise_generator_.initialize(settings_, isHolonomic(), name_, parameters_handler_);
+  noise_generator_.initialize(node, name_, parameters_handler_);
+
 
   reset();
 }
@@ -81,6 +84,8 @@ void Optimizer::getParams()
   getParam(s.sampling_std.vx, "vx_std", 0.2f);
   getParam(s.sampling_std.vy, "vy_std", 0.2f);
   getParam(s.sampling_std.wz, "wz_std", 0.4f);
+  getParam(s.advanced_constraints.wz_std_decay_to, "advanced.wz_std_decay_to", 0.0f);
+  getParam(s.advanced_constraints.wz_std_decay_strength, "advanced.wz_std_decay_strength", -1.0f);
   getParam(s.retry_attempt_limit, "retry_attempt_limit", 1);
 
   s.base_constraints.ax_max = fabs(s.base_constraints.ax_max);
@@ -167,7 +172,7 @@ void Optimizer::setOffset(double controller_frequency)
   }
 }
 
-void Optimizer::reset()
+void Optimizer::reset(bool reset_dynamic_speed_limits)
 {
   state_.reset(settings_.batch_size, settings_.time_steps);
   control_sequence_.reset(settings_.time_steps);
@@ -176,7 +181,9 @@ void Optimizer::reset()
   control_history_[2] = {0.0f, 0.0f, 0.0f};
   control_history_[3] = {0.0f, 0.0f, 0.0f};
 
-  settings_.constraints = settings_.base_constraints;
+  if (reset_dynamic_speed_limits) {
+    settings_.constraints = settings_.base_constraints;
+  }
 
   costs_.setZero(settings_.batch_size);
   generated_trajectories_.reset(settings_.batch_size, settings_.time_steps);
@@ -250,6 +257,7 @@ void Optimizer::prepare(
 {
   state_.pose = robot_pose;
   state_.speed = robot_speed;
+  state_.local_path_length = nav2_util::geometry_utils::calculate_path_length(plan);
   path_ = utils::toTensor(plan);
   costs_.setZero();
   goal_ = goal;
@@ -370,6 +378,9 @@ void Optimizer::integrateStateVelocities(
   auto traj_yaws = trajectory.col(2);
 
   const size_t n_size = traj_yaws.size();
+  if (n_size == 0) {
+    return;
+  }
 
   float last_yaw = initial_yaw;
   for(size_t i = 0; i != n_size; i++) {
@@ -473,13 +484,17 @@ void Optimizer::updateControlSequence()
   auto & s = settings_;
 
   auto vx_T = control_sequence_.vx.transpose();
-  auto wz_T = control_sequence_.wz.transpose();
   auto bounded_noises_vx = state_.cvx.rowwise() - vx_T;
-  auto bounded_noises_wz = state_.cwz.rowwise() - wz_T;
   const float gamma_vx = s.gamma / (s.sampling_std.vx * s.sampling_std.vx);
-  const float gamma_wz = s.gamma / (s.sampling_std.wz * s.sampling_std.wz);
   costs_ += (gamma_vx * (bounded_noises_vx.rowwise() * vx_T).rowwise().sum()).eval();
-  costs_ += (gamma_wz * (bounded_noises_wz.rowwise() * wz_T).rowwise().sum()).eval();
+
+  const float & wz_std_adaptive = noise_generator_.getWzStdAdaptive();
+  if (wz_std_adaptive > 0.0f) {
+    auto wz_T = control_sequence_.wz.transpose();
+    auto bounded_noises_wz = state_.cwz.rowwise() - wz_T;
+    const float gamma_wz = s.gamma / (wz_std_adaptive * wz_std_adaptive);
+    costs_ += (gamma_wz * (bounded_noises_wz.rowwise() * wz_T).rowwise().sum()).eval();
+  }
 
   if (is_holo) {
     auto vy_T = control_sequence_.vy.transpose();

@@ -19,17 +19,21 @@
 
 #include <string>
 #include <memory>
+#include <tuple>
 
 #include "rclcpp_lifecycle/lifecycle_node.hpp"
 
 #include "nav2_costmap_2d/costmap_2d_ros.hpp"
 #include "nav2_core/goal_checker.hpp"
 #include "nav2_core/controller_exceptions.hpp"
+#include "tf2_ros/buffer.h"
+#include "pluginlib/class_loader.hpp"
 
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "nav_msgs/msg/path.hpp"
+#include "nav2_util/geometry_utils.hpp"
 
 #include "nav2_mppi_controller/models/optimizer_settings.hpp"
 #include "nav2_mppi_controller/motion_models.hpp"
@@ -68,10 +72,12 @@ public:
    * @param name Name of plugin
    * @param costmap_ros Costmap2DROS object of environment
    * @param dynamic_parameter_handler Parameter handler object
+   * @param tf_buffer TF buffer for transformations
    */
   void initialize(
     rclcpp_lifecycle::LifecycleNode::WeakPtr parent, const std::string & name,
     std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros,
+    std::shared_ptr<tf2_ros::Buffer> tf_buffer,
     ParametersHandler * dynamic_parameters_handler);
 
   /**
@@ -120,8 +126,9 @@ public:
 
   /**
    * @brief Reset the optimization problem to initial conditions
+   * @param Whether to reset the constraints to its base values
    */
-  void reset();
+  void reset(bool reset_dynamic_speed_limits = true);
 
   /**
    * @brief Get the motion model time step
@@ -253,6 +260,7 @@ protected:
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
   nav2_costmap_2d::Costmap2D * costmap_;
   std::string name_;
+  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
 
   std::shared_ptr<MotionModel> motion_model_;
 
