@@ -24,6 +24,10 @@
 #include <condition_variable>
 #include <random>
 
+#include "rclcpp/rclcpp.hpp"
+#include "std_msgs/msg/float32.hpp"
+#include "std_msgs/msg/float64.hpp"
+
 #include "nav2_mppi_controller/models/optimizer_settings.hpp"
 #include "nav2_mppi_controller/tools/parameters_handler.hpp"
 #include "nav2_mppi_controller/models/control_sequence.hpp"
@@ -108,6 +112,11 @@ protected:
    */
   void generateNoisedControls();
 
+  /**
+   * @brief Publish effective values for monitoring
+   */
+  void publishEffectiveValues() const;
+
   Eigen::ArrayXXf noises_vx_;
   Eigen::ArrayXXf noises_vy_;
   Eigen::ArrayXXf noises_wz_;
@@ -128,6 +137,13 @@ protected:
    * If decay is disabled, SamplingStd.wz == wz_std_adaptive
   */
   float wz_std_adaptive;
+  
+  /**
+   * @brief Current speed value for monitoring
+  */
+  float current_speed_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr wz_std_pub_;
+  rclcpp::Publisher<std_msgs::msg::Float32>::SharedPtr current_speed_pub_;
 };
 
 }  // namespace mppi

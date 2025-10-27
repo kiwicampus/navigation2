@@ -34,6 +34,19 @@ void NoiseGenerator::initialize(
   auto getParam = param_handler->getParamGetter(name);
   getParam(regenerate_noises, "regenerate_noises", false);
 
+
+  // Create publishers for monitoring effective values
+  if (auto locked_node = node.lock()) {
+    wz_std_pub_ = locked_node->create_publisher<std_msgs::msg::Float32>(
+      "/navigation/mppi/wz_std", rclcpp::QoS(1).best_effort());
+    // wz_max_pub_ = locked_node->create_publisher<std_msgs::msg::Float32>(
+    //   "/navigation/monitor/mppi/wz_max", rclcpp::QoS(1).best_effort());
+    current_speed_pub_ = locked_node->create_publisher<std_msgs::msg::Float32>(
+      "/navigation/mppi/current_speed", rclcpp::QoS(1).best_effort());
+  } else {
+    throw std::runtime_error("Failed to lock node for publisher creation.");
+  }
+
   if (regenerate_noises) {
     noise_thread_ = std::make_unique<std::thread>(std::bind(&NoiseGenerator::noiseThread, this));
   } else {
@@ -84,18 +97,21 @@ void NoiseGenerator::computeAdaptiveStds(const models::State & state)
 {
   auto & s = settings_;
 
+  // Calculate current speed first
+  float current_speed;
+  if (is_holonomic_) {
+    const auto vx = static_cast<float>(state.speed.linear.x);
+    const auto vy = static_cast<float>(state.speed.linear.y);
+    current_speed = hypotf(vx, vy);
+  } else {
+    current_speed = std::fabs(static_cast<float>(state.speed.linear.x));
+  }
+  
+
   // Should we apply decay function? or Any constraint is invalid?
   if (s.advanced_constraints.wz_std_decay_strength <= 0.0f || !validateWzStdDecayConstraints()) {
     wz_std_adaptive = s.sampling_std.wz;  // skip calculation
   } else {
-    float current_speed;
-    if (is_holonomic_) {
-      const auto vx = static_cast<float>(state.speed.linear.x);
-      const auto vy = static_cast<float>(state.speed.linear.y);
-      current_speed = hypotf(vx, vy);
-    } else {
-      current_speed = std::fabs(static_cast<float>(state.speed.linear.x));
-    }
 
     static const float e = std::exp(1.0f);
     const float decayed_wz_std =
@@ -105,6 +121,9 @@ void NoiseGenerator::computeAdaptiveStds(const models::State & state)
 
     wz_std_adaptive = decayed_wz_std;
   }
+  
+  // Store current speed for monitoring
+  current_speed_ = current_speed;
 }
 
 bool NoiseGenerator::validateWzStdDecayConstraints() const
@@ -137,6 +156,7 @@ void NoiseGenerator::reset(const mppi::models::OptimizerSettings & settings, boo
     is_holonomic_ = is_holonomic;
     // reset initial adaptive value to parameterized value
     wz_std_adaptive = settings_.sampling_std.wz;
+    current_speed_ = 0.0f;
     noises_vx_.setZero(settings_.batch_size, settings_.time_steps);
     noises_vy_.setZero(settings_.batch_size, settings_.time_steps);
     noises_wz_.setZero(settings_.batch_size, settings_.time_steps);
@@ -172,6 +192,7 @@ void NoiseGenerator::noiseThread()
 void NoiseGenerator::generateNoisedControls()
 {
   auto & s = settings_;
+  publishEffectiveValues();
   auto ndistribution_vx = std::normal_distribution(0.0f, settings_.sampling_std.vx);
   auto ndistribution_wz = std::normal_distribution(0.0f, wz_std_adaptive);
   auto ndistribution_vy = std::normal_distribution(0.0f, settings_.sampling_std.vy);
@@ -182,6 +203,23 @@ void NoiseGenerator::generateNoisedControls()
   if (is_holonomic_) {
     noises_vy_ = Eigen::ArrayXXf::NullaryExpr(
       s.batch_size, s.time_steps, [&]() {return ndistribution_vy(generator_);});
+  }
+}
+
+void NoiseGenerator::publishEffectiveValues() const
+{
+  if (wz_std_pub_ && current_speed_pub_) {
+    auto wz_std_msg = std::make_unique<std_msgs::msg::Float32>();
+    // auto wz_max_msg = std::make_unique<std_msgs::msg::Float32>();
+    auto current_speed_msg = std::make_unique<std_msgs::msg::Float32>();
+    
+    wz_std_msg->data = wz_std_adaptive;
+    // wz_max_msg->data = settings_.base_constraints.wz;
+    current_speed_msg->data = current_speed_;
+    
+    wz_std_pub_->publish(*wz_std_msg);
+    // wz_max_pub_->publish(*wz_max_msg);
+    current_speed_pub_->publish(*current_speed_msg);
   }
 }
 }  // namespace mppi
