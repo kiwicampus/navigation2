@@ -91,7 +91,7 @@ bool Polygon::configure()
       polygon_.polygon.points.push_back(p_s);
     }
 
-    rclcpp::QoS polygon_qos = rclcpp::SystemDefaultsQoS();  // set to default
+    rclcpp::QoS polygon_qos = rclcpp::QoS(rclcpp::KeepLast(1));  // Use non-zero history for intraprocess
     polygon_pub_ = node->create_publisher<geometry_msgs::msg::PolygonStamped>(
       polygon_pub_topic, polygon_qos);
   }
@@ -518,7 +518,7 @@ void Polygon::createSubscription(std::string & polygon_sub_topic)
       logger_,
       "[%s]: Subscribing on %s topic for polygon",
       polygon_name_.c_str(), polygon_sub_topic.c_str());
-    rclcpp::QoS polygon_qos = rclcpp::SystemDefaultsQoS();  // set to default
+    rclcpp::QoS polygon_qos = rclcpp::QoS(rclcpp::KeepLast(1));  // Use non-zero history for intraprocess
     if (polygon_subscribe_transient_local_) {
       polygon_qos.transient_local();
     }
