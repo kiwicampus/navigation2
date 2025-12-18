@@ -38,6 +38,7 @@ This process is then repeated a number of times and returns a converged solution
 ## Configuration
 
 ### Controller
+
  | Parameter                  | Type   | Definition                                                                                                                                                                                                                                                                                                           |
  | ---------------------      | ------ | -------------------------------------------------------------------------------------------------------- |
  | motion_model               | string | Default: DiffDrive. Type of model [DiffDrive, Omni, Ackermann].                                          |
@@ -59,15 +60,17 @@ This process is then repeated a number of times and returns a converged solution
  | retry_attempt_limit        | int    | Default 1. Number of attempts to find feasible trajectory on failure for soft-resets before reporting failure.                                                                                                                                                                                                       |
  | regenerate_noises          | bool   | Default false. Whether to regenerate noises each iteration or use single noise distribution computed on initialization and reset. Practically, this is found to work fine since the trajectories are being sampled stochastically from a normal distribution and reduces compute jittering at run-time due to thread wake-ups to resample normal distribution. |
  | publish_optimal_trajectory | bool   | Publishes the full optimal trajectory sequence each control iteration for downstream  control systems, collision checkers, etc to have context beyond the next timestep. |
-
+ | open_loop        | bool    | Default false. Useful when using low accelerations and when wheel odometry's latency causes issues in initial state estimation. |
 
 #### Trajectory Visualizer
+
  | Parameter             | Type   | Definition                                                                                                  |
  | ---------------       | ------ | ----------------------------------------------------------------------------------------------------------- |
  | trajectory_step       | int    | Default: 5. The step between trajectories to visualize to downsample candidate trajectory pool.             |
  | time_step             | int    | Default: 3. The step between points on trajectories to visualize to downsample trajectory density.          |
 
 #### Path Handler
+
  | Parameter                  | Type   | Definition                                                                                                  |
  | ---------------            | ------ | ----------------------------------------------------------------------------------------------------------- |
  | max_robot_pose_search_dist | double | Default: Costmap half-size. Max integrated distance ahead of robot pose to search for nearest path point in case of path looping.   |
@@ -78,17 +81,20 @@ This process is then repeated a number of times and returns a converged solution
  | inversion_yaw_tolerance        | double | Default: 0.4. Angular proximity (radians) to path inversion point to be considered "achieved" to pass on the rest of the path after path inversion. 0.4 rad = 23 deg.  |
 
 #### Ackermann Motion Model
+
  | Parameter            | Type   | Definition                                                                                                  |
  | -------------------- | ------ | ----------------------------------------------------------------------------------------------------------- |
  | min_turning_r        | double | minimum turning radius for ackermann motion model                                                           |
 
 #### Constraint Critic
+
  | Parameter             | Type   | Definition                                                                                                  |
  | ---------------       | ------ | ----------------------------------------------------------------------------------------------------------- |
  | cost_weight           | double | Default 4.0. Weight to apply to critic term.                                                                |
  | cost_power            | int    | Default 1. Power order to apply to term.
 
 #### Goal Angle Critic
+
  | Parameter                        | Type   | Definition                                                                                                  |
  | ---------------                  | ------ | ----------------------------------------------------------------------------------------------------------- |
  | cost_weight                      | double | Default 3.0. Weight to apply to critic term.                                                                |
@@ -96,12 +102,12 @@ This process is then repeated a number of times and returns a converged solution
  | threshold_to_consider            | double | Default 0.5. Minimal distance between robot and goal above which angle goal cost considered.               |
 
 #### Goal Critic
+
  | Parameter            | Type   | Definition                                                                                                  |
  | -------------------- | ------ | ----------------------------------------------------------------------------------------------------------- |
  | cost_weight          | double | Default 5.0. Weight to apply to critic term.                                                                |
  | cost_power           | int    | Default 1. Power order to apply to term.                                                                    |
  | threshold_to_consider      | double | Default 1.4. Distance between robot and goal above which goal cost starts being considered                                    |
-
 
 #### Obstacles Critic
 
@@ -134,6 +140,7 @@ Uses inflated costmap cost directly to avoid obstacles
  | trajectory_point_step      | int | Default 2. Step of trajectory points to evaluate for costs since otherwise so dense represents multiple points for a single costmap cell.   |
 
 #### Path Align Critic
+
  | Parameter                  | Type   | Definition                                                                                                                         |
  | ---------------            | ------ | -----------------------------------------------------------------------------------------------------------                        |
  | cost_weight                | double | Default 10.0. Weight to apply to critic term.                                                                                       |
@@ -145,6 +152,7 @@ Uses inflated costmap cost directly to avoid obstacles
  | use_path_orientations   | bool | Default false. Whether to consider path's orientations in path alignment, which can be useful when paired with feasible smac planners to incentivize directional changes only where/when the smac planner requests them. If you want the robot to deviate and invert directions where the controller sees fit, keep as false. If your plans do not contain orientation information (e.g. navfn), keep as false.  |
 
 #### Path Angle Critic
+
  | Parameter                 | Type   | Definition                                                                                                  |
  | ---------------           | ------ | ----------------------------------------------------------------------------------------------------------- |
  | cost_weight               | double | Default 2.2. Weight to apply to critic term.                                                                |
@@ -154,8 +162,8 @@ Uses inflated costmap cost directly to avoid obstacles
  | max_angle_to_furthest     | double | Default 0.785398. Angular distance between robot and goal above which path angle cost starts being considered           |
  | mode     | int | Default 0 (Forward Preference). Enum type for mode of operations for the path angle critic depending on path input types and behavioral desires. 0: Forward Preference, penalizes high path angles relative to the robot's orientation to incentivize turning towards the path. 1: No directional preference, penalizes high path angles relative to the robot's orientation or mirrored orientation (e.g. reverse), which ever is less, when a particular direction of travel is not preferable. 2: Consider feasible path orientation, when using a feasible path whereas the path points have orientation information (e.g. Smac Planners), consider the path's requested direction of travel to penalize path angles such that the robot will follow the path in the requested direction. |
 
-
 #### Path Follow Critic
+
  | Parameter             | Type   | Definition                                                                                                  |
  | ---------------       | ------ | ----------------------------------------------------------------------------------------------------------- |
  | cost_weight           | double | Default 5.0. Weight to apply to critic term.                                                                |
@@ -164,29 +172,30 @@ Uses inflated costmap cost directly to avoid obstacles
  | threshold_to_consider        | float  | Default 1.4. Distance between robot and goal above which path follow cost stops being considered  |
 
 #### Prefer Forward Critic
+
  | Parameter             | Type   | Definition                                                                                                  |
  | ---------------       | ------ | ----------------------------------------------------------------------------------------------------------- |
  | cost_weight           | double | Default 5.0. Weight to apply to critic term.                                                                |
  | cost_power            | int    | Default 1. Power order to apply to term.                                                                    |
  | threshold_to_consider | double | Default 0.5. Distance between robot and goal above which prefer forward cost stops being considered         |
 
-
 #### Twirling Critic
+
  | Parameter             | Type   | Definition                                                                                                  |
  | ---------------       | ------ | ----------------------------------------------------------------------------------------------------------- |
  | cost_weight           | double | Default 10.0. Weight to apply to critic term.                                                               |
  | cost_power            | int    | Default 1. Power order to apply to term.                                                                    |
 
-
 #### Velocity Deadband Critic
+
  | Parameter             | Type     | Definition                                                                                                  |
  | ---------------       | ------   | ----------------------------------------------------------------------------------------------------------- |
  | cost_weight           | double   | Default 35.0. Weight to apply to critic term.                                                               |
  | cost_power            | int      | Default 1. Power order to apply to term.                                                                    |
  | deadband_velocities   | double[] | Default [0.0, 0.0, 0.0].  The array of deadband velocities [vx, vz, wz]. A zero array indicates that the critic will take no action.      |
 
-
 ### XML configuration example
+
 ```
 controller_server:
   ros__parameters:
@@ -287,6 +296,7 @@ controller_server:
       #   twirling_cost_power: 1
       #   twirling_cost_weight: 10.0
 ```
+
 ## Topics
 
 | Topic                     | Type                             | Description                                                           |
