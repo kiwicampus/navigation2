@@ -41,11 +41,14 @@
 
 #include <functional>
 #include <unordered_map>
+#include <variant>
 
 #include "rclcpp/rclcpp.hpp"
 
 #include "message_filters/subscriber.h"
 #include "message_filters/time_synchronizer.h"
+#include "message_filters/synchronizer.h"
+#include "message_filters/sync_policies/approximate_time.h"
 #include "nav2_costmap_2d/costmap_layer.hpp"
 #include "nav2_costmap_2d/layer.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
@@ -148,12 +151,20 @@ class SemanticSegmentationLayer : public CostmapLayer
     std::vector<
         std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::PointCloud2, rclcpp_lifecycle::LifecycleNode>>>
         pointcloud_subs_;
-    std::vector<
-        std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::PointCloud2>>>
-        segm_pc_notifiers_;
-    std::vector<
-        std::shared_ptr<message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::Image, sensor_msgs::msg::PointCloud2>>>
-        segm_conf_pc_notifiers_;
+    // Synchronizer type definitions
+    using ExactSync2 = message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::PointCloud2>;
+    using ExactSync3 = message_filters::TimeSynchronizer<sensor_msgs::msg::Image, sensor_msgs::msg::Image, sensor_msgs::msg::PointCloud2>;
+    using ApproxSyncPolicy2 = message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::Image, sensor_msgs::msg::PointCloud2>;
+    using ApproxSyncPolicy3 = message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::Image, sensor_msgs::msg::Image, sensor_msgs::msg::PointCloud2>;
+    using ApproxSync2 = message_filters::Synchronizer<ApproxSyncPolicy2>;
+    using ApproxSync3 = message_filters::Synchronizer<ApproxSyncPolicy3>;
+    
+    // Variant to hold either exact or approximate time synchronizers
+    using Sync2Variant = std::variant<std::shared_ptr<ExactSync2>, std::shared_ptr<ApproxSync2>>;
+    using Sync3Variant = std::variant<std::shared_ptr<ExactSync3>, std::shared_ptr<ApproxSync3>>;
+    
+    std::vector<Sync2Variant> segm_pc_notifiers_;
+    std::vector<Sync3Variant> segm_conf_pc_notifiers_;
     std::vector<std::shared_ptr<tf2_ros::MessageFilter<sensor_msgs::msg::PointCloud2>>> pointcloud_tf_subs_;
 
     // debug publishers
@@ -170,6 +181,7 @@ class SemanticSegmentationLayer : public CostmapLayer
 
     bool rolling_window_;
     bool was_reset_;
+    bool use_approximate_time_sync_;
     int combination_method_;
 };
 
