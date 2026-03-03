@@ -92,7 +92,7 @@ void SegmentationBuffer::createSegmentationCostMultimap(const vision_msgs::msg::
   {
     const auto& name = semantic_class.class_name;
     if (class_names_cost_map_.find(name) == class_names_cost_map_.end()) {
-      RCLCPP_ERROR(logger_, 
+      RCLCPP_INFO(logger_, 
         "CRITICAL ERROR: Class '%s' from label_info is not defined in the costmap parameters! This class will be ignored.", 
         name.c_str());
       continue;
@@ -224,7 +224,7 @@ void SegmentationBuffer::bufferSegmentation(
 
   } catch (tf2::TransformException& ex)
   {
-    RCLCPP_INFO(logger_,
+    RCLCPP_ERROR(logger_,
                  "TF Exception that should never happen for sensor frame: %s, cloud frame: %s, %s",
                  sensor_frame_.c_str(), cloud.header.frame_id.c_str(), ex.what());
     return;
