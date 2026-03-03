@@ -224,7 +224,7 @@ void SegmentationBuffer::bufferSegmentation(
 
   } catch (tf2::TransformException& ex)
   {
-    RCLCPP_ERROR(logger_,
+    RCLCPP_INFO(logger_,
                  "TF Exception that should never happen for sensor frame: %s, cloud frame: %s, %s",
                  sensor_frame_.c_str(), cloud.header.frame_id.c_str(), ex.what());
     return;
