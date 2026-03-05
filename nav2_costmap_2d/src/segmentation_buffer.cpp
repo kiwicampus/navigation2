@@ -54,7 +54,10 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
                                        tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map,
-                                       bool use_cost_selection)
+                                       bool use_cost_selection,
+                                       double camera_h_fov, double camera_v_fov,
+                                       double camera_min_dist, double camera_max_dist,
+                                       double fov_inside_decay_time, double fov_outside_decay_time)
   : tf2_buffer_(tf2_buffer)
   , class_types_(class_types)
   , class_names_cost_map_(class_names_cost_map)
@@ -66,6 +69,12 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   , sq_max_lookahead_distance_(std::pow(max_lookahead_distance, 2))
   , sq_min_lookahead_distance_(std::pow(min_lookahead_distance, 2))
   , tf_tolerance_(tf_tolerance)
+  , camera_h_fov_(camera_h_fov)
+  , camera_v_fov_(camera_v_fov)
+  , camera_min_dist_(camera_min_dist)
+  , camera_max_dist_(camera_max_dist)
+  , fov_inside_decay_time_(fov_inside_decay_time)
+  , fov_outside_decay_time_(fov_outside_decay_time)
 {
   auto node = parent.lock();
   clock_ = node->get_clock();
@@ -74,6 +83,7 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   temporal_tile_map_ = std::make_shared<SegmentationTileMap>(costmap_resolution, tile_map_decay_time);
   visualize_tile_map_ = visualize_tile_map;
   use_cost_selection_ = use_cost_selection;
+  camera_frustum_ = std::make_unique<geometry::DepthCameraFrustum>(camera_v_fov_, camera_h_fov_, camera_min_dist_, camera_max_dist_);
   RCLCPP_INFO(logger_, "SegmentationBuffer [%s]: Selection method = %s", 
               buffer_source_.c_str(), 
               use_cost_selection_ ? "COST-BASED (max_cost)" : "CONFIDENCE-BASED");
@@ -123,6 +133,17 @@ void SegmentationBuffer::bufferSegmentation(
     local_origin.point.y = 0;
     local_origin.point.z = 0;
     tf2_buffer_.transform(local_origin, global_origin, global_frame_, tf_tolerance_);
+
+    // Update the camera frustum pose using the same TF that placed the sensor origin
+    geometry_msgs::msg::TransformStamped sensor_to_global =
+      tf2_buffer_.lookupTransform(global_frame_, origin_frame, cloud.header.stamp, tf_tolerance_);
+    geometry_msgs::msg::Point frustum_origin;
+    frustum_origin.x = sensor_to_global.transform.translation.x;
+    frustum_origin.y = sensor_to_global.transform.translation.y;
+    frustum_origin.z = sensor_to_global.transform.translation.z;
+    camera_frustum_->SetPosition(frustum_origin);
+    camera_frustum_->SetOrientation(sensor_to_global.transform.rotation);
+    camera_frustum_->TransformModel();
 
     sensor_msgs::msg::PointCloud2 global_frame_cloud;
 
@@ -197,6 +218,23 @@ void SegmentationBuffer::bufferSegmentation(
 
     // emplace the best observations in the mask into the tile map
     temporal_tile_map_->lock();
+
+    // FOV-aware decay: tiles outside the current camera frustum decay faster.
+    // Only applied when fov_outside_decay_time_ > 0 (feature explicitly enabled).
+    if (fov_outside_decay_time_ > 0.0)
+    {
+      const double inside_decay  = (fov_inside_decay_time_  > 0.0) ? fov_inside_decay_time_  : temporal_tile_map_->getDecayTime();
+      const double outside_decay = fov_outside_decay_time_;
+
+      for (auto & tile : *temporal_tile_map_)
+      {
+        TileWorldXY world = temporal_tile_map_->indexToWorld(tile.first.x, tile.first.y);
+        openvdb::Vec3d pt(world.x, world.y, 0.0);
+        const double decay = camera_frustum_->IsInside(pt) ? inside_decay : outside_decay;
+        tile.second.setDecayTime(decay);
+      }
+    }
+
     temporal_tile_map_->purgeOldObservations(cloud_time_seconds);
     for (auto& idx : best_observations_idxs)
     {

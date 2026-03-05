@@ -44,6 +44,7 @@
 #include "nav2_util/lifecycle_node.hpp"
 #include "rclcpp/time.hpp"
 #include "sensor_msgs/msg/image.hpp"
+#include "spatio_temporal_voxel_layer/frustum_models/depth_camera_frustum.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2_ros/buffer.h"
@@ -385,6 +386,8 @@ class SegmentationTileMap {
             return tile_map_.size();
         }
 
+        float getDecayTime() const { return decay_time_; }
+
         /**
          * @brief Converts world coordinates to a TileIndex.
          * @param x X coordinate in world space.
@@ -674,7 +677,10 @@ class SegmentationBuffer
                        double expected_update_rate, double max_lookahead_distance, double min_lookahead_distance,
                        tf2_ros::Buffer& tf2_buffer, std::string global_frame, std::string sensor_frame,
                        tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map = false,
-                       bool use_cost_selection = true);
+                       bool use_cost_selection = true,
+                       double camera_h_fov = 1.52, double camera_v_fov = 1.01,
+                       double camera_min_dist = 0.0, double camera_max_dist = 8.0,
+                       double fov_inside_decay_time = 5.0, double fov_outside_decay_time = 5.0);
 
     /**
      * @brief  Destructor... cleans up
@@ -784,6 +790,15 @@ class SegmentationBuffer
     rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr tile_map_pub_;
     // If true, select observation per tile using highest max_cost. If false, use highest confidence
     bool use_cost_selection_ = true;
+
+    // Camera frustum for FOV-aware tile decay
+    std::unique_ptr<geometry::DepthCameraFrustum> camera_frustum_;
+    double camera_h_fov_;
+    double camera_v_fov_;
+    double camera_min_dist_;
+    double camera_max_dist_;
+    double fov_inside_decay_time_;
+    double fov_outside_decay_time_;
 };
 }  // namespace nav2_costmap_2d
 #endif  // NAV2_COSTMAP_2D__SEGMENTATION_BUFFER_HPP_

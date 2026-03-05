@@ -28,8 +28,13 @@ find_package(angles REQUIRED)
 
 remove_definitions(-DDISABLE_LIBUSB-1.0)
 find_package(Eigen3 3.3 REQUIRED)
+find_package(openvdb_vendor REQUIRED)
 
 nav2_package()
+
+set(STVL_SRC_DIR
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../navigation_plugins/costmap_2d_plugins/spatio_temporal_voxel_layer"
+)
 
 add_library(nav2_costmap_2d_core SHARED
   src/costmap_2d.cpp
@@ -45,6 +50,7 @@ add_library(nav2_costmap_2d_core SHARED
   src/clear_costmap_service.cpp
   src/footprint_collision_checker.cpp
   plugins/costmap_filters/costmap_filter.cpp
+  ${STVL_SRC_DIR}/src/frustum_models/depth_camera_frustum.cpp
 )
 add_library(${PROJECT_NAME}::nav2_costmap_2d_core ALIAS nav2_costmap_2d_core)
 
@@ -52,6 +58,7 @@ target_include_directories(nav2_costmap_2d_core
   PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+    "$<BUILD_INTERFACE:${STVL_SRC_DIR}/include>"
 )
 
 set(dependencies
@@ -81,7 +88,10 @@ set(dependencies
 ament_target_dependencies(nav2_costmap_2d_core
   ${dependencies}
 )
-target_link_libraries(nav2_costmap_2d_core Eigen3::Eigen)
+# openvdb_vendor is kept out of the exported dependencies to avoid
+# propagating its TBB/VTK search to downstream packages (e.g. STVL).
+ament_target_dependencies(nav2_costmap_2d_core openvdb_vendor)
+target_link_libraries(nav2_costmap_2d_core Eigen3::Eigen OpenVDB::openvdb)
 
 add_library(layers SHARED
   plugins/inflation_layer.cpp
