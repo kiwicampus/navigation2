@@ -133,10 +133,11 @@ void SimpleChargingDock::configure(
       std::bind(&SimpleChargingDock::jointStateCallback, this, std::placeholders::_1));
   }
 
-  dock_pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("dock_pose", 1);
+  auto transient_local_qos = rclcpp::QoS(1).transient_local().reliable();
+  dock_pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("dock_pose", transient_local_qos);
   filtered_dock_pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>(
-    "filtered_dock_pose", 1);
-  staging_pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("staging_pose", 1);
+    "filtered_dock_pose", transient_local_qos);
+  staging_pose_pub_ = node_->create_publisher<geometry_msgs::msg::PoseStamped>("staging_pose", transient_local_qos);
 }
 
 geometry_msgs::msg::PoseStamped SimpleChargingDock::getStagingPose(
