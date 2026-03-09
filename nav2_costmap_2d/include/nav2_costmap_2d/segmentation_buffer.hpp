@@ -43,6 +43,7 @@
 
 #include "nav2_util/lifecycle_node.hpp"
 #include "rclcpp/time.hpp"
+#include "rcutils/logging_macros.h"
 #include "sensor_msgs/msg/image.hpp"
 #include "spatio_temporal_voxel_layer/frustum_models/depth_camera_frustum.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
@@ -242,6 +243,9 @@ class TemporalObservationQueue
                 double age = current_time - queue.front().timestamp;
                 if (age > decay_time_)
                 {
+                    RCUTILS_LOG_DEBUG_NAMED("nav2_costmap_2d",
+                        "purgeOld: deleted observation class_id=%d  age=%.3fs > decay=%.3fs",
+                        static_cast<int>(class_id), age, decay_time_);
                     class_confidence_sums_[class_id] -= queue.front().confidence;
                     queue.pop_front();
                 }

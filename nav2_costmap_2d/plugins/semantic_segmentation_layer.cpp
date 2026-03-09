@@ -187,6 +187,20 @@ void SemanticSegmentationLayer::onInitialize()
       exit(-1);
     }
 
+    RCLCPP_INFO(logger_,
+      "[%s] Source '%s' initialized:\n"
+      "  segmentation_topic:    %s\n"
+      "  pointcloud_topic:      %s\n"
+      "  tile_map_decay_time:   %.2f s\n"
+      "  fov_decay_time:        %.2f s  (-1 = use tile_map_decay_time)\n"
+      "  outside_fov_decay_time:%.2f s  (-1 = disabled)\n"
+      "  camera hFOV/vFOV:      %.3f / %.3f rad\n"
+      "  camera min/max dist:   %.2f / %.2f m",
+      name_.c_str(), source.c_str(),
+      segmentation_topic.c_str(), pointcloud_topic.c_str(),
+      tile_map_decay_time, fov_decay_time, outside_fov_decay_time,
+      camera_h_fov, camera_v_fov, camera_min_dist, camera_max_dist);
+
     //sensor data subscriptions
     auto sub_opt = rclcpp::SubscriptionOptions();
     sub_opt.callback_group = callback_group_;

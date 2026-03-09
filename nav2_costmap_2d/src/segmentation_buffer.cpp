@@ -84,9 +84,17 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   visualize_tile_map_ = visualize_tile_map;
   use_cost_selection_ = use_cost_selection;
   camera_frustum_ = std::make_unique<geometry::DepthCameraFrustum>(camera_v_fov_, camera_h_fov_, camera_min_dist_, camera_max_dist_);
-  RCLCPP_INFO(logger_, "SegmentationBuffer [%s]: Selection method = %s", 
-              buffer_source_.c_str(), 
-              use_cost_selection_ ? "COST-BASED (max_cost)" : "CONFIDENCE-BASED");
+  RCLCPP_INFO(logger_,
+    "SegmentationBuffer [%s] started:\n"
+    "  selection method:       %s\n"
+    "  tile_map_decay_time:    %.2f s  (global, applied to every new tile)\n"
+    "  fov_decay_time:         %.2f s  (-1 = use tile_map_decay_time)\n"
+    "  outside_fov_decay_time: %.2f s  (-1 = FOV-aware decay disabled)",
+    buffer_source_.c_str(),
+    use_cost_selection_ ? "COST-BASED (max_cost)" : "CONFIDENCE-BASED",
+    temporal_tile_map_->getDecayTime(),
+    fov_inside_decay_time_,
+    fov_outside_decay_time_);
   if(visualize_tile_map_)
   {
     tile_map_pub_ = node->create_publisher<sensor_msgs::msg::PointCloud2>(buffer_source + "/tile_map",1);
@@ -225,14 +233,19 @@ void SegmentationBuffer::bufferSegmentation(
     {
       const double inside_decay  = (fov_inside_decay_time_  > 0.0) ? fov_inside_decay_time_  : temporal_tile_map_->getDecayTime();
       const double outside_decay = fov_outside_decay_time_;
+      int tiles_inside = 0, tiles_outside = 0;
 
       for (auto & tile : *temporal_tile_map_)
       {
         TileWorldXY world = temporal_tile_map_->indexToWorld(tile.first.x, tile.first.y);
         openvdb::Vec3d pt(world.x, world.y, 0.0);
-        const double decay = camera_frustum_->IsInside(pt) ? inside_decay : outside_decay;
-        tile.second.setDecayTime(decay);
+        const bool inside = camera_frustum_->IsInside(pt);
+        tile.second.setDecayTime(inside ? inside_decay : outside_decay);
+        inside ? ++tiles_inside : ++tiles_outside;
       }
+      RCLCPP_DEBUG(logger_,
+        "SegmentationBuffer [%s] FOV decay applied: %d tiles inside (%.2fs), %d tiles outside (%.2fs)",
+        buffer_source_.c_str(), tiles_inside, inside_decay, tiles_outside, outside_decay);
     }
 
     temporal_tile_map_->purgeOldObservations(cloud_time_seconds);
