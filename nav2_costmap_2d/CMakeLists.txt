@@ -32,10 +32,6 @@ find_package(openvdb_vendor REQUIRED)
 
 nav2_package()
 
-set(STVL_SRC_DIR
-  "${CMAKE_CURRENT_SOURCE_DIR}/../../navigation_plugins/costmap_2d_plugins/spatio_temporal_voxel_layer"
-)
-
 add_library(nav2_costmap_2d_core SHARED
   src/costmap_2d.cpp
   src/layer.cpp
@@ -50,7 +46,6 @@ add_library(nav2_costmap_2d_core SHARED
   src/clear_costmap_service.cpp
   src/footprint_collision_checker.cpp
   plugins/costmap_filters/costmap_filter.cpp
-  ${STVL_SRC_DIR}/src/frustum_models/depth_camera_frustum.cpp
 )
 add_library(${PROJECT_NAME}::nav2_costmap_2d_core ALIAS nav2_costmap_2d_core)
 
@@ -58,7 +53,6 @@ target_include_directories(nav2_costmap_2d_core
   PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
-    "$<BUILD_INTERFACE:${STVL_SRC_DIR}/include>"
 )
 
 set(dependencies

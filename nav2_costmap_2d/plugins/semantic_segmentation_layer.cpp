@@ -122,6 +122,7 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "camera_max_dist", rclcpp::ParameterValue(8.0));
     declareParameter(source + "." + "fov_decay_time", rclcpp::ParameterValue(-1.0));
     declareParameter(source + "." + "outside_fov_decay_time", rclcpp::ParameterValue(-1.0));
+    declareParameter(source + "." + "visualize_frustum_fov", rclcpp::ParameterValue(false));
 
     node->get_parameter(name_ + "." + source + "." + "segmentation_topic", segmentation_topic);
     node->get_parameter(name_ + "." + source + "." + "confidence_topic", confidence_topic);
@@ -144,6 +145,8 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + source + "." + "camera_max_dist", camera_max_dist);
     node->get_parameter(name_ + "." + source + "." + "fov_decay_time", fov_decay_time);
     node->get_parameter(name_ + "." + source + "." + "outside_fov_decay_time", outside_fov_decay_time);
+    bool visualize_frustum_fov = false;
+    node->get_parameter(name_ + "." + source + "." + "visualize_frustum_fov", visualize_frustum_fov);
     if (class_types_string.empty())
     {
       RCLCPP_ERROR(logger_, "no class types defined for source %s. Segmentation plugin cannot work this way", source.c_str());
@@ -222,7 +225,7 @@ void SemanticSegmentationLayer::onInitialize()
       tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map,
       use_cost_selection,
       camera_h_fov, camera_v_fov, camera_min_dist, camera_max_dist,
-      fov_decay_time, outside_fov_decay_time);
+      fov_decay_time, outside_fov_decay_time, visualize_frustum_fov);
 
     segmentation_buffers_.push_back(segmentation_buffer);
     
