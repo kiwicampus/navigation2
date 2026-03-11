@@ -104,8 +104,9 @@ struct TileWorldXY
 
 /**
  * @brief 2D ground-plane FOV checker for points at z=0.
- * Builds the frustum footprint on the ground (ray-z=0 intersections) and uses point-in-polygon
- * instead of 3D plane tests. Convention: camera Z forward, ±vFOV/2, ±hFOV/2 for the 4 corner rays.
+ * Builds the frustum footprint from 8 control points (4 at min_dist, 4 at max_dist) and uses
+ * Graham-scan convex hull + point-in-polygon. Avoids cleaning obstacles below the robot or too far.
+ * Horizon: rays pointing upward project to max_dist on z=0. Convention: camera Z forward, ±vFOV/2, ±hFOV/2.
  */
 class GroundPlaneFOVChecker
 {
@@ -146,30 +147,17 @@ public:
     }
 
     /**
-     * @return Always 4 points: ray-ground (z=0) intersection for each of the 4 frustum rays (no min/max range).
-     * If a ray does not hit z=0, that point has x,y set to NaN.
+     * @return Always 4 points: ray-ground (z=0) intersection for each of the 4 frustum rays.
+     * Uses horizon logic: if ray points up, projects to max_dist on z=0.
      */
     std::array<geometry_msgs::msg::Point, 4> getFrustumGroundCorners4() const
     {
         std::array<geometry_msgs::msg::Point, 4> out;
-        const double nan_val = std::numeric_limits<double>::quiet_NaN();
         for (size_t i = 0; i < 4u; ++i) {
             Eigen::Vector3d world_dir = orientation_ * local_rays_[i];
-            if (std::abs(world_dir.z()) < 1e-9) {
-                out[i].x = nan_val;
-                out[i].y = nan_val;
-                out[i].z = 0.0;
-                continue;
-            }
-            double t = -position_.z() / world_dir.z();
-            // if (t < 0) {
-            //     out[i].x = nan_val;
-            //     out[i].y = nan_val;
-            //     out[i].z = 0.0;
-            //     continue;
-            // }
-            out[i].x = position_.x() + t * world_dir.x();
-            out[i].y = position_.y() + t * world_dir.y();
+            auto hit = rayGroundIntersectUnclipped(position_, world_dir);
+            out[i].x = hit.has_value() ? hit->x : std::numeric_limits<double>::quiet_NaN();
+            out[i].y = hit.has_value() ? hit->y : std::numeric_limits<double>::quiet_NaN();
             out[i].z = 0.0;
         }
         return out;
@@ -197,33 +185,58 @@ private:
         }
     }
 
-    /** Ray–ground (z=0) intersection; returns nullopt if ray does not hit in front or out of [min_d, max_d]. */
+    /**
+     * Ray–ground (z=0) intersection; returns nullopt if out of [min_d, max_d].
+     * Horizon logic: if ray points upward (dir.z >= 0), projects to max_dist on z=0 instead of failing.
+     */
     std::optional<Vec2D> rayGroundIntersect(const Eigen::Vector3d& origin, const Eigen::Vector3d& dir) const
     {
-        if (std::abs(dir.z()) < 1e-9) return std::nullopt;
-        double t = -origin.z() / dir.z();
-        if (t < 0) return std::nullopt;
-        double dist = (dir * t).norm();
-        if (dist < min_d_ || dist > max_d_) return std::nullopt;
-        return Vec2D{origin.x() + t * dir.x(), origin.y() + t * dir.y()};
+        const double eps = 1e-9;
+        Eigen::Vector3d d = dir.normalized();
+        Vec2D pt;
+        if (d.z() < -eps) {
+            double t = -origin.z() / d.z();
+            if (t < 0) return std::nullopt;
+            double dist = (d * t).norm();
+            if (dist < min_d_ || dist > max_d_) return std::nullopt;
+            pt = Vec2D{origin.x() + t * d.x(), origin.y() + t * d.y()};
+        } else {
+            // Ray points up or horizontal: project point at max_dist onto z=0
+            Eigen::Vector3d p_max = origin + max_d_ * d;
+            pt = Vec2D{p_max.x(), p_max.y()};
+        }
+        return pt;
     }
 
-    /** Same as ray–ground intersection but no min/max range filter; used so polygon matches logged 4 corners. */
+    /** Same as ray–ground intersection but no min/max range filter. Horizon: dir.z >= 0 → project to max_dist. */
     std::optional<Vec2D> rayGroundIntersectUnclipped(const Eigen::Vector3d& origin, const Eigen::Vector3d& dir) const
     {
-        if (std::abs(dir.z()) < 1e-9) return std::nullopt;
-        double t = -origin.z() / dir.z();
-        if (t < 0) return std::nullopt;
-        return Vec2D{origin.x() + t * dir.x(), origin.y() + t * dir.y()};
+        const double eps = 1e-9;
+        Eigen::Vector3d d = dir.normalized();
+        if (d.z() < -eps) {
+            double t = -origin.z() / d.z();
+            if (t < 0) return std::nullopt;
+            return Vec2D{origin.x() + t * d.x(), origin.y() + t * d.y()};
+        }
+        Eigen::Vector3d p_max = origin + max_d_ * d;
+        return Vec2D{p_max.x(), p_max.y()};
+    }
+
+    /** Projects 3D point at distance d along ray onto xy plane (z=0 footprint). */
+    Vec2D rayProjectAtDistance(const Eigen::Vector3d& origin, const Eigen::Vector3d& dir, double d) const
+    {
+        Eigen::Vector3d p = origin + d * dir.normalized();
+        return Vec2D{p.x(), p.y()};
     }
 
     void recomputeGroundPolygon()
     {
         std::vector<Vec2D> candidates;
+        candidates.reserve(8);
         for (const auto& ray : local_rays_) {
             Eigen::Vector3d world_dir = orientation_ * ray;
-            auto hit = rayGroundIntersectUnclipped(position_, world_dir);
-            if (hit.has_value()) candidates.push_back(*hit);
+            candidates.push_back(rayProjectAtDistance(position_, world_dir, min_d_));
+            candidates.push_back(rayProjectAtDistance(position_, world_dir, max_d_));
         }
         if (candidates.size() < 3) {
             ground_polygon_.clear();
@@ -232,16 +245,21 @@ private:
         ground_polygon_ = convexHull(std::move(candidates));
     }
 
+    /**
+     * Point-in-polygon test. Polygon must be CCW (convex hull output).
+     * Cross product (b-a)×(p-a): positive => point to left of edge => INSIDE.
+     * cross == 0 (on edge) treated as inside for robustness.
+     */
     static bool pointInPolygon(const Vec2D& p, const std::vector<Vec2D>& poly)
     {
-        size_t n = poly.size();
+        const size_t n = poly.size();
         for (size_t i = 0; i < n; ++i) {
             const Vec2D& a = poly[i];
             const Vec2D& b = poly[(i + 1) % n];
-            double cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
-            if (cross < 0) return false;
+            const double cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+            if (cross < 0) return false;  // outside (right of edge)
         }
-        return true;
+        return true;  // inside or on edge
     }
 
     static std::vector<Vec2D> convexHull(std::vector<Vec2D> pts)
