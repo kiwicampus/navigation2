@@ -146,23 +146,6 @@ public:
         return out;
     }
 
-    /**
-     * @return Always 4 points: ray-ground (z=0) intersection for each of the 4 frustum rays.
-     * Uses horizon logic: if ray points up, projects to max_dist on z=0.
-     */
-    std::array<geometry_msgs::msg::Point, 4> getFrustumGroundCorners4() const
-    {
-        std::array<geometry_msgs::msg::Point, 4> out;
-        for (size_t i = 0; i < 4u; ++i) {
-            Eigen::Vector3d world_dir = orientation_ * local_rays_[i];
-            auto hit = rayGroundIntersectUnclipped(position_, world_dir);
-            out[i].x = hit.has_value() ? hit->x : std::numeric_limits<double>::quiet_NaN();
-            out[i].y = hit.has_value() ? hit->y : std::numeric_limits<double>::quiet_NaN();
-            out[i].z = 0.0;
-        }
-        return out;
-    }
-
 private:
     struct Vec2D { double x, y; };
 

@@ -173,13 +173,7 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
         last_frustum_origin_y_ = frustum_origin.y;
         last_frustum_origin_z_ = frustum_origin.z;
 
-        std::array<geometry_msgs::msg::Point, 4> corners4 = ground_fov_checker_.getFrustumGroundCorners4();
         std::vector<geometry_msgs::msg::Point> polygon = ground_fov_checker_.getGroundPolygonForVisualization();
-        RCLCPP_INFO_THROTTLE(logger_, *clock_, 2000,
-                             "[%s] 3) Obtained the following points. 4 corners: [0](%.3f,%.3f) [1](%.3f,%.3f) "
-                             "[2](%.3f,%.3f) [3](%.3f,%.3f). Polygon size=%zu",
-                             buffer_source_.c_str(), corners4[0].x, corners4[0].y, corners4[1].x, corners4[1].y,
-                             corners4[2].x, corners4[2].y, corners4[3].x, corners4[3].y, polygon.size());
         if (!polygon.empty())
         {
             std::string poly_str;
@@ -320,53 +314,17 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
             double sample_inside_world_x = 0.0, sample_inside_world_y = 0.0;
             bool has_sample_outside = false, has_sample_inside = false;
 
-            auto format4 = [](const std::array<geometry_msgs::msg::Point, 4>& c) {
-                std::string s = "frustum 4 corners: ";
-                char buf[32];
-                for (size_t i = 0; i < 4u; ++i) {
-                    if (i > 0) s += " ";
-                    if (std::isnan(c[i].x) || std::isnan(c[i].y))
-                        s += "(above horizon)";
-                    else {
-                        std::snprintf(buf, sizeof(buf), "(%.2f,%.2f)", c[i].x, c[i].y);
-                        s += buf;
-                    }
-                }
-                return s;
-            };
-            std::string frustum_4corners_str = format4(corners4);
-
-            std::string frustum_corners_str;
-            if (polygon.size() >= 3)
-            {
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), "frustum ground polygon %zu points: ",
-                              polygon.size());
-                frustum_corners_str = buf;
-                for (size_t i = 0; i < polygon.size(); ++i)
-                {
-                    if (i > 0) frustum_corners_str += " ";
-                    std::snprintf(buf, sizeof(buf), "(%.2f,%.2f)", polygon[i].x, polygon[i].y);
-                    frustum_corners_str += buf;
-                }
-            }
-            else
-            {
-                frustum_corners_str =
-                    "frustum ground polygon: empty (no ray hit z=0 in range). " + frustum_4corners_str;
-            }
-
             const size_t total_tiles = temporal_tile_map_->size();
             RCLCPP_INFO(logger_,
                         "SegmentationBuffer [%s] FOV decay enabled: fov_decay_time=%.2fs (inside), "
-                        "outside_fov_decay_time=%.2fs, temporal_tile_map size=%zu, %s",
-                        buffer_source_.c_str(), inside_decay, outside_decay, total_tiles, frustum_4corners_str.c_str());
+                        "outside_fov_decay_time=%.2fs, temporal_tile_map size=%zu",
+                        buffer_source_.c_str(), inside_decay, outside_decay, total_tiles);
 
             if (polygon.empty())
             {
                 RCLCPP_WARN_THROTTLE(logger_, *clock_, 5000,
                                     "SegmentationBuffer [%s] Frustum ground polygon is empty: no tiles will be "
-                                    "INSIDE. Camera may be looking horizontal (rays do not hit z=0 in [min,max] range).",
+                                    " Camera may be looking horizontal (rays do not hit z=0 in [min,max] range).",
                                     buffer_source_.c_str());
             }
 
@@ -376,9 +334,8 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
                 TileWorldXY world = temporal_tile_map_->indexToWorld(tile.first.x, tile.first.y);
                 const bool inside = ground_fov_checker_.isInFOV(world.x, world.y);
                 RCLCPP_INFO_THROTTLE(logger_, *clock_, 1000,
-                                    "ANALYZING POINT [%s]: -> tile %d,%d world(%.2f, %.2f) | %s",
-                                    buffer_source_.c_str(), tile.first.x, tile.first.y, world.x, world.y,
-                                    frustum_4corners_str.c_str());
+                                    "ANALYZING POINT [%s]: -> tile %d,%d world(%.2f, %.2f) |",
+                                    buffer_source_.c_str(), tile.first.x, tile.first.y, world.x, world.y);
                 if (!inside)
                 {
                     if (!has_sample_outside)
@@ -388,14 +345,14 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
                         has_sample_outside = true;
                     }
                     ++observations_outside_fov_count_;
-                    if (observations_outside_fov_count_ % 500 == 0)
-                    {
-                        RCLCPP_INFO(logger_,
-                                    "SegmentationBuffer [%s]: observation OUTSIDE FOV (every 500th: #%d) -> "
-                                    "tile decay set to %.2fs | tile %d,%d world (%.2f, %.2f) | %s",
-                                    buffer_source_.c_str(), observations_outside_fov_count_, outside_decay,
-                                    tile.first.x, tile.first.y, world.x, world.y, frustum_4corners_str.c_str());
-                    }
+                    // if (observations_outside_fov_count_ % 500 == 0)
+                    // {
+                    //     RCLCPP_INFO(logger_,
+                    //                 "SegmentationBuffer [%s]: observation OUTSIDE FOV (every 500th: #%d) -> "
+                    //                 "tile decay set to %.2fs | tile %d,%d world (%.2f, %.2f) |",
+                    //                 buffer_source_.c_str(), observations_outside_fov_count_, outside_decay,
+                    //                 tile.first.x, tile.first.y, world.x, world.y);
+                    // }
                 }
                 else
                 {
@@ -406,14 +363,14 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
                         has_sample_inside = true;
                     }
                     ++observations_inside_fov_count_;
-                    if (observations_inside_fov_count_ % 500 == 0)
-                    {
-                        RCLCPP_INFO(logger_,
-                                    "SegmentationBuffer [%s]: observation INSIDE FOV (every 500th: #%d) -> "
-                                    "tile decay set to %.2fs | tile %d,%d world (%.2f, %.2f) | %s",
-                                    buffer_source_.c_str(), observations_inside_fov_count_, inside_decay, tile.first.x,
-                                    tile.first.y, world.x, world.y, frustum_4corners_str.c_str());
-                    }
+                    // if (observations_inside_fov_count_ % 500 == 0)
+                    // {
+                    //     RCLCPP_INFO(logger_,
+                    //                 "SegmentationBuffer [%s]: observation INSIDE FOV (every 500th: #%d) -> "
+                    //                 "tile decay set to %.2fs | tile %d,%d world (%.2f, %.2f) |",
+                    //                 buffer_source_.c_str(), observations_inside_fov_count_, inside_decay, tile.first.x,
+                    //                 tile.first.y, world.x, world.y);
+                    // }
                 }
                 tile.second.setDecayTime(inside ? inside_decay : outside_decay);
                 inside ? ++tiles_inside : ++tiles_outside;
@@ -430,16 +387,14 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
             {
                 RCLCPP_WARN_THROTTLE(logger_, *clock_, 5000,
                                      "SegmentationBuffer [%s] No tiles inside FOV this update. "
-                                     "Sample outside tile world (%.2f, %.2f). %s",
-                                     buffer_source_.c_str(), sample_outside_world_x, sample_outside_world_y,
-                                     frustum_4corners_str.c_str());
+                                     "Sample outside tile world (%.2f, %.2f).",
+                                     buffer_source_.c_str(), sample_outside_world_x, sample_outside_world_y);
             }
             if (tiles_inside > 0 && has_sample_inside)
             {
                 RCLCPP_INFO_THROTTLE(logger_, *clock_, 5000,
-                                     "SegmentationBuffer [%s] Sample inside tile world (%.2f, %.2f). %s",
-                                     buffer_source_.c_str(), sample_inside_world_x, sample_inside_world_y,
-                                     frustum_4corners_str.c_str());
+                                     "SegmentationBuffer [%s] Sample inside tile world (%.2f, %.2f)",
+                                     buffer_source_.c_str(), sample_inside_world_x, sample_inside_world_y);
             }
         }
 
@@ -452,16 +407,20 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
 
             // Only process observations with defined class IDs
             if (segmentation_cost_multimap_->hasClassId(class_id))
-            {
+            {   
+                
                 TileObservation best_obs{class_id, static_cast<float>(confidence.data[img_idx_for_best_obs]),
                                          cloud_time_seconds};
+                RCLCPP_INFO_THROTTLE(logger_, *clock_, 1000, "SegmentationBuffer [%s]: Found observation for class_id %d in tile (%d, %d) with confidence %f",
+                                            buffer_source_.c_str(), static_cast<int>(class_id), costmap_index.x, costmap_index.y,
+                                            static_cast<double>(confidence.data[img_idx_for_best_obs]));
                 bool dominant_priority = segmentation_cost_multimap_->getCostById(class_id).dominant_priority;
                 temporal_tile_map_->pushObservation(best_obs, costmap_index, dominant_priority);
             }
             else
             {
-                RCLCPP_DEBUG(logger_, "SegmentationBuffer [%s]: Skipping undefined class_id %d in tile (%d, %d)",
-                             buffer_source_.c_str(), class_id, costmap_index.x, costmap_index.y);
+                    RCLCPP_INFO_THROTTLE(logger_, *clock_, 1000, "SegmentationBuffer [%s]: Skipping undefined class_id %d in tile (%d, %d)",
+                                buffer_source_.c_str(), class_id, costmap_index.x, costmap_index.y);
             }
         }
         temporal_tile_map_->unlock();
