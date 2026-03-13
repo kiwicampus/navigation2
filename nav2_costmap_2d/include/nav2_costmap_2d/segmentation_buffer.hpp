@@ -38,10 +38,7 @@
 #define NAV2_COSTMAP_2D__SEGMENTATION_BUFFER_HPP_
 
 #include <algorithm>
-#include <array>
 #include <cmath>
-#include <limits>
-#include <list>
 #include <optional>
 #include <string>
 #include <vector>
@@ -80,9 +77,9 @@ struct TileIndex {
 };
 
 namespace std {
-/**
- * @brief Custom hash function for TileIndex to enable its use as a key in unordered_map.
- */
+    /**
+     * @brief Custom hash function for TileIndex to enable its use as a key in unordered_map.
+     */
     template<>
     struct hash<TileIndex> {
         size_t operator()(const TileIndex& coord) const {
@@ -253,43 +250,11 @@ private:
         }
         return true;  // inside or on edge
     }
-
-    static std::vector<Vec2D> convexHull(std::vector<Vec2D> pts)
-    {
-        size_t n = pts.size();
-        if (n < 3) return pts;
-        size_t pivot = 0;
-        for (size_t i = 1; i < n; ++i)
-            if (pts[i].y < pts[pivot].y || (pts[i].y == pts[pivot].y && pts[i].x < pts[pivot].x))
-                pivot = i;
-        std::swap(pts[0], pts[pivot]);
-        Vec2D origin = pts[0];
-        auto cross2d = [](const Vec2D& O, const Vec2D& A, const Vec2D& B) {
-            return (A.x - O.x) * (B.y - O.y) - (A.y - O.y) * (B.x - O.x);
-        };
-        auto dist2 = [](const Vec2D& a, const Vec2D& b) {
-            return (a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y);
-        };
-        std::sort(pts.begin() + 1, pts.end(), [&](const Vec2D& a, const Vec2D& b) {
-            double c = cross2d(origin, a, b);
-            if (std::abs(c) < 1e-9) return dist2(origin, a) < dist2(origin, b);
-            return c > 0;
-        });
-        std::vector<Vec2D> hull;
-        for (auto& p : pts) {
-            while (hull.size() >= 2 && cross2d(hull[hull.size() - 2], hull.back(), p) <= 0)
-                hull.pop_back();
-            hull.push_back(p);
-        }
-        return hull;
-    }
 };
-
 /**
  * @brief Encapsulates the observation data for a tile, including class ID, cost, confidence, and timestamp.
  */
-struct TileObservation
-{
+struct TileObservation {
     using UniquePtr = std::unique_ptr<TileObservation>;
 
     uint8_t class_id;
@@ -334,8 +299,7 @@ class TemporalObservationQueue
         size_t current_class_size = queue.size();
         bool should_become_dominant = false;
 
-        if (dominant_priority)
-        {
+        if (dominant_priority) {
             should_become_dominant = true;
         }
         else

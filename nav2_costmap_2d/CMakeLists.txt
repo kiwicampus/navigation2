@@ -28,7 +28,6 @@ find_package(angles REQUIRED)
 
 remove_definitions(-DDISABLE_LIBUSB-1.0)
 find_package(Eigen3 3.3 REQUIRED)
-find_package(openvdb_vendor REQUIRED)
 
 nav2_package()
 
@@ -82,10 +81,6 @@ set(dependencies
 ament_target_dependencies(nav2_costmap_2d_core
   ${dependencies}
 )
-# openvdb_vendor is kept out of the exported dependencies to avoid
-# propagating its TBB/VTK search to downstream packages (e.g. STVL).
-ament_target_dependencies(nav2_costmap_2d_core openvdb_vendor)
-target_link_libraries(nav2_costmap_2d_core Eigen3::Eigen OpenVDB::openvdb)
 
 add_library(layers SHARED
   plugins/inflation_layer.cpp

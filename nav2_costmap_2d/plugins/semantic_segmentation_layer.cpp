@@ -118,8 +118,8 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "use_cost_selection", rclcpp::ParameterValue(true));
     declareParameter(source + "." + "camera_horizontal_fov", rclcpp::ParameterValue(1.52));
     declareParameter(source + "." + "camera_vertical_fov", rclcpp::ParameterValue(1.01));
-    declareParameter(source + "." + "camera_min_dist", rclcpp::ParameterValue(0.3));
-    declareParameter(source + "." + "camera_max_dist", rclcpp::ParameterValue(8.0));
+    declareParameter(source + "." + "camera_min_dist", rclcpp::ParameterValue(1.0));
+    declareParameter(source + "." + "camera_max_dist", rclcpp::ParameterValue(3.0));
     declareParameter(source + "." + "fov_decay_time", rclcpp::ParameterValue(-1.0));
     declareParameter(source + "." + "outside_fov_decay_time", rclcpp::ParameterValue(-1.0));
     declareParameter(source + "." + "visualize_frustum_fov", rclcpp::ParameterValue(false));
@@ -189,20 +189,6 @@ void SemanticSegmentationLayer::onInitialize()
       RCLCPP_ERROR(logger_, "No classes defined for source %s. Segmentation plugin cannot work this way", source.c_str());
       exit(-1);
     }
-
-    RCLCPP_INFO(logger_,
-      "[%s] Source '%s' initialized:\n"
-      "  segmentation_topic:    %s\n"
-      "  pointcloud_topic:      %s\n"
-      "  tile_map_decay_time:   %.2f s\n"
-      "  fov_decay_time:        %.2f s  (-1 = use tile_map_decay_time)\n"
-      "  outside_fov_decay_time:%.2f s  (-1 = disabled)\n"
-      "  camera hFOV/vFOV:      %.3f / %.3f rad\n"
-      "  camera min/max dist:   %.2f / %.2f m",
-      name_.c_str(), source.c_str(),
-      segmentation_topic.c_str(), pointcloud_topic.c_str(),
-      tile_map_decay_time, fov_decay_time, outside_fov_decay_time,
-      camera_h_fov, camera_v_fov, camera_min_dist, camera_max_dist);
 
     //sensor data subscriptions
     auto sub_opt = rclcpp::SubscriptionOptions();

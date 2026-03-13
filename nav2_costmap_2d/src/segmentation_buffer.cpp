@@ -38,17 +38,13 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cstdio>
-#include <list>
 #include <string>
 #include <vector>
-
-#include <array>
 #include <cmath>
 
-#include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "tf2/convert.h"
+#include "rclcpp/rclcpp.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 using namespace std::chrono_literals;
@@ -93,14 +89,6 @@ SegmentationBuffer::SegmentationBuffer(
     {
         frustum_fov_pub_ = node->create_publisher<visualization_msgs::msg::Marker>(buffer_source + "/frustum_fov", 1);
     }
-    RCLCPP_INFO(logger_,
-                "SegmentationBuffer [%s] started:\n"
-                "  selection method:       %s\n"
-                "  tile_map_decay_time:    %.2f s  (global, applied to every new tile)\n"
-                "  fov_decay_time:         %.2f s  (-1 = use tile_map_decay_time)\n"
-                "  outside_fov_decay_time: %.2f s  (-1 = FOV-aware decay disabled)",
-                buffer_source_.c_str(), use_cost_selection_ ? "COST-BASED (max_cost)" : "CONFIDENCE-BASED",
-                temporal_tile_map_->getDecayTime(), fov_inside_decay_time_, fov_outside_decay_time_);
     if (visualize_tile_map_)
     {
         tile_map_pub_ = node->create_publisher<sensor_msgs::msg::PointCloud2>(buffer_source + "/tile_map", 1);
@@ -157,35 +145,12 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
         frustum_origin.y = global_origin.point.y;
         frustum_origin.z = global_origin.point.z;
 
-        RCLCPP_INFO_THROTTLE(logger_, *clock_, 2000,
-                             "[%s] 1) Extracted current TF: translation (%.3f, %.3f, %.3f) rotation (qx=%.3f qy=%.3f "
-                             "qz=%.3f qw=%.3f) frame %s -> %s",
-                             buffer_source_.c_str(), cam_tf.transform.translation.x, cam_tf.transform.translation.y,
-                             cam_tf.transform.translation.z, cam_tf.transform.rotation.x, cam_tf.transform.rotation.y,
-                             cam_tf.transform.rotation.z, cam_tf.transform.rotation.w, cam_tf.header.frame_id.c_str(),
-                             cam_tf.child_frame_id.c_str());
-        RCLCPP_INFO_THROTTLE(logger_, *clock_, 2000,
-                             "[%s] 2) Will transform point (%.3f, %.3f, %.3f) to obtain the 4 points of the polygon",
-                             buffer_source_.c_str(), frustum_origin.x, frustum_origin.y, frustum_origin.z);
-
         ground_fov_checker_.updatePose(frustum_origin, cam_tf.transform.rotation);
         last_frustum_origin_x_ = frustum_origin.x;
         last_frustum_origin_y_ = frustum_origin.y;
         last_frustum_origin_z_ = frustum_origin.z;
 
         std::vector<geometry_msgs::msg::Point> polygon = ground_fov_checker_.getGroundPolygonForVisualization();
-        if (!polygon.empty())
-        {
-            std::string poly_str;
-            for (size_t i = 0; i < polygon.size(); ++i)
-            {
-                char buf[64];
-                std::snprintf(buf, sizeof(buf), " [%zu](%.3f,%.3f)", i, polygon[i].x, polygon[i].y);
-                poly_str += buf;
-            }
-            RCLCPP_INFO_THROTTLE(logger_, *clock_, 2000, "[%s] 3b) Polygon vertices (x,y):%s",
-                                buffer_source_.c_str(), poly_str.c_str());
-        }
 
         if (visualize_frustum_fov_ && frustum_fov_pub_)
         {
@@ -302,31 +267,18 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
         // emplace the best observations in the mask into the tile map
         temporal_tile_map_->lock();
 
-        // FOV-aware decay: tiles outside the current camera frustum decay faster.
-        // Only applied when fov_outside_decay_time_ > 0 (feature explicitly enabled).
         if (fov_outside_decay_time_ > 0.0)
         {
             const double inside_decay =
                 (fov_inside_decay_time_ > 0.0) ? fov_inside_decay_time_ : temporal_tile_map_->getDecayTime();
             const double outside_decay = fov_outside_decay_time_;
             int tiles_inside = 0, tiles_outside = 0;
-            double sample_outside_world_x = 0.0, sample_outside_world_y = 0.0;
-            double sample_inside_world_x = 0.0, sample_inside_world_y = 0.0;
-            bool has_sample_outside = false, has_sample_inside = false;
-
+            
             const size_t total_tiles = temporal_tile_map_->size();
             RCLCPP_INFO(logger_,
                         "SegmentationBuffer [%s] FOV decay enabled: fov_decay_time=%.2fs (inside), "
                         "outside_fov_decay_time=%.2fs, temporal_tile_map size=%zu",
                         buffer_source_.c_str(), inside_decay, outside_decay, total_tiles);
-
-            if (polygon.empty())
-            {
-                RCLCPP_WARN_THROTTLE(logger_, *clock_, 5000,
-                                    "SegmentationBuffer [%s] Frustum ground polygon is empty: no tiles will be "
-                                    " Camera may be looking horizontal (rays do not hit z=0 in [min,max] range).",
-                                    buffer_source_.c_str());
-            }
 
             // For each (mx, my) tile in the map, test if its world position is inside the 2D FOV
             for (auto& tile : *temporal_tile_map_)
@@ -336,43 +288,12 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
                 RCLCPP_INFO_THROTTLE(logger_, *clock_, 1000,
                                     "ANALYZING POINT [%s]: -> tile %d,%d world(%.2f, %.2f) |",
                                     buffer_source_.c_str(), tile.first.x, tile.first.y, world.x, world.y);
-                if (!inside)
-                {
-                    if (!has_sample_outside)
-                    {
-                        sample_outside_world_x = world.x;
-                        sample_outside_world_y = world.y;
-                        has_sample_outside = true;
-                    }
-                }
-                else
-                {
-                    if (!has_sample_inside)
-                    {
-                        sample_inside_world_x = world.x;
-                        sample_inside_world_y = world.y;
-                        has_sample_inside = true;
-                    }
-                }
                 tile.second.setDecayTime(inside ? inside_decay : outside_decay);
                 inside ? ++tiles_inside : ++tiles_outside;
             }
             RCLCPP_DEBUG(logger_,
                          "SegmentationBuffer [%s] FOV decay applied: %d tiles inside (%.2fs), %d tiles outside (%.2fs)",
                          buffer_source_.c_str(), tiles_inside, inside_decay, tiles_outside, outside_decay);
-            if (tiles_inside == 0 && tiles_outside > 0 && has_sample_outside)
-            {
-                RCLCPP_WARN_THROTTLE(logger_, *clock_, 5000,
-                                     "SegmentationBuffer [%s] No tiles inside FOV this update. "
-                                     "Sample outside tile world (%.2f, %.2f).",
-                                     buffer_source_.c_str(), sample_outside_world_x, sample_outside_world_y);
-            }
-            if (tiles_inside > 0 && has_sample_inside)
-            {
-                RCLCPP_INFO_THROTTLE(logger_, *clock_, 5000,
-                                     "SegmentationBuffer [%s] Sample inside tile world (%.2f, %.2f)",
-                                     buffer_source_.c_str(), sample_inside_world_x, sample_inside_world_y);
-            }
         }
 
         temporal_tile_map_->purgeOldObservations(cloud_time_seconds);
@@ -429,20 +350,21 @@ void SegmentationBuffer::updateClassMap(std::string new_class, CostHeuristicPara
 
 bool SegmentationBuffer::isCurrent() const
 {
-    if (expected_update_rate_ == rclcpp::Duration(0.0s))
-    {
-        return true;
-    }
+  if (expected_update_rate_ == rclcpp::Duration(0.0s))
+  {
+    return true;
+  }
 
-    bool current = (clock_->now() - last_updated_) <= expected_update_rate_;
-    if (!current)
-    {
-        RCLCPP_WARN(logger_,
-                    "The %s segmentation buffer has not been updated for %.2f seconds, "
-                    "and it should be updated every %.2f seconds.",
-                    buffer_source_.c_str(), (clock_->now() - last_updated_).seconds(), expected_update_rate_.seconds());
-    }
-    return current;
+  bool current = (clock_->now() - last_updated_) <= expected_update_rate_;
+  if (!current)
+  {
+    RCLCPP_WARN(logger_,
+                "The %s segmentation buffer has not been updated for %.2f seconds, "
+                "and it should be updated every %.2f seconds.",
+                buffer_source_.c_str(), (clock_->now() - last_updated_).seconds(),
+                expected_update_rate_.seconds());
+  }
+  return current;
 }
 
 void SegmentationBuffer::resetLastUpdated() { last_updated_ = clock_->now(); }
