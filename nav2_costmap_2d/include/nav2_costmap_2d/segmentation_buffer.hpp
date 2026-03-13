@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <list>
 #include <optional>
@@ -104,9 +105,9 @@ struct TileWorldXY
 
 /**
  * @brief 2D ground-plane FOV checker for points at z=0.
- * Builds the frustum footprint from 8 control points (4 at min_dist, 4 at max_dist) and uses
- * Graham-scan convex hull + point-in-polygon. Avoids cleaning obstacles below the robot or too far.
- * Horizon: rays pointing upward project to max_dist on z=0. Convention: camera Z forward, ±vFOV/2, ±hFOV/2.
+ * Four corner rays → intersection with plane z=0. If intersection distance is outside [min_d, max_d],
+ * substitutes the point at min_d or max_d along the ray (xy footprint). Always 4 vertices, ordered CCW.
+ * Convention: camera Z forward, ±vFOV/2, ±hFOV/2.
  */
 class GroundPlaneFOVChecker
 {
@@ -168,64 +169,72 @@ private:
         }
     }
 
-    /**
-     * Ray–ground (z=0) intersection; returns nullopt if out of [min_d, max_d].
-     * Horizon logic: if ray points upward (dir.z >= 0), projects to max_dist on z=0 instead of failing.
-     */
-    std::optional<Vec2D> rayGroundIntersect(const Eigen::Vector3d& origin, const Eigen::Vector3d& dir) const
+    /** xy of origin + dist * d (footprint for clamping when intersection is out of range). */
+    static Vec2D rayPointAtDistance(
+        const Eigen::Vector3d& origin, const Eigen::Vector3d& d_unit, double dist)
     {
-        const double eps = 1e-9;
-        Eigen::Vector3d d = dir.normalized();
-        Vec2D pt;
-        if (d.z() < -eps) {
-            double t = -origin.z() / d.z();
-            if (t < 0) return std::nullopt;
-            double dist = (d * t).norm();
-            if (dist < min_d_ || dist > max_d_) return std::nullopt;
-            pt = Vec2D{origin.x() + t * d.x(), origin.y() + t * d.y()};
-        } else {
-            // Ray points up or horizontal: project point at max_dist onto z=0
-            Eigen::Vector3d p_max = origin + max_d_ * d;
-            pt = Vec2D{p_max.x(), p_max.y()};
-        }
-        return pt;
-    }
-
-    /** Same as ray–ground intersection but no min/max range filter. Horizon: dir.z >= 0 → project to max_dist. */
-    std::optional<Vec2D> rayGroundIntersectUnclipped(const Eigen::Vector3d& origin, const Eigen::Vector3d& dir) const
-    {
-        const double eps = 1e-9;
-        Eigen::Vector3d d = dir.normalized();
-        if (d.z() < -eps) {
-            double t = -origin.z() / d.z();
-            if (t < 0) return std::nullopt;
-            return Vec2D{origin.x() + t * d.x(), origin.y() + t * d.y()};
-        }
-        Eigen::Vector3d p_max = origin + max_d_ * d;
-        return Vec2D{p_max.x(), p_max.y()};
-    }
-
-    /** Projects 3D point at distance d along ray onto xy plane (z=0 footprint). */
-    Vec2D rayProjectAtDistance(const Eigen::Vector3d& origin, const Eigen::Vector3d& dir, double d) const
-    {
-        Eigen::Vector3d p = origin + d * dir.normalized();
+        Eigen::Vector3d p = origin + dist * d_unit;
         return Vec2D{p.x(), p.y()};
+    }
+
+    /**
+     * One point per ray on the ground footprint: ray ∩ z=0 when distance in [min_d, max_d];
+     * if t < min_d use point at min_d along ray; if t > max_d use max_d; if no forward
+     * intersection or horizontal ray, use max_d (horizon cap). Always returns a valid Vec2D.
+     */
+    Vec2D rayGroundPointClamped(const Eigen::Vector3d& origin, const Eigen::Vector3d& dir) const
+    {
+        const double eps = 1e-9;
+        Eigen::Vector3d d = dir.normalized();
+
+        // Horizontal / upward: no single z=0 hit in front — cap at max_d for stable quad
+        if (d.z() >= -eps) {
+            return rayPointAtDistance(origin, d, max_d_);
+        }
+
+        const double t = -origin.z() / d.z();  // distance along ray to z=0
+        if (t <= 0.0) {
+            return rayPointAtDistance(origin, d, max_d_);
+        }
+        if (t < min_d_) {
+            return rayPointAtDistance(origin, d, min_d_);
+        }
+        if (t > max_d_) {
+            return rayPointAtDistance(origin, d, max_d_);
+        }
+        return Vec2D{origin.x() + t * d.x(), origin.y() + t * d.y()};
+    }
+
+    /** Order 4 points CCW around centroid so LINE_STRIP closes without self-intersection. */
+    static std::vector<Vec2D> orderQuadCCW(std::vector<Vec2D> pts)
+    {
+        if (pts.size() < 3) return pts;
+        double cx = 0, cy = 0;
+        for (const auto& p : pts) {
+            cx += p.x;
+            cy += p.y;
+        }
+        cx /= static_cast<double>(pts.size());
+        cy /= static_cast<double>(pts.size());
+        std::sort(pts.begin(), pts.end(), [cx, cy](const Vec2D& a, const Vec2D& b) {
+            return std::atan2(a.y - cy, a.x - cx) < std::atan2(b.y - cy, b.x - cx);
+        });
+        return pts;
     }
 
     void recomputeGroundPolygon()
     {
-        std::vector<Vec2D> candidates;
-        candidates.reserve(8);
-        for (const auto& ray : local_rays_) {
-            Eigen::Vector3d world_dir = orientation_ * ray;
-            candidates.push_back(rayProjectAtDistance(position_, world_dir, min_d_));
-            candidates.push_back(rayProjectAtDistance(position_, world_dir, max_d_));
-        }
-        if (candidates.size() < 3) {
+        if (local_rays_.size() != 4u) {
             ground_polygon_.clear();
             return;
         }
-        ground_polygon_ = convexHull(std::move(candidates));
+        std::vector<Vec2D> candidates;
+        candidates.reserve(4);
+        for (const auto& ray : local_rays_) {
+            Eigen::Vector3d world_dir = orientation_ * ray;
+            candidates.push_back(rayGroundPointClamped(position_, world_dir));
+        }
+        ground_polygon_ = orderQuadCCW(std::move(candidates));
     }
 
     /**
@@ -426,9 +435,6 @@ class TemporalObservationQueue
                 double age = current_time - queue.front().timestamp;
                 if (age > decay_time_)
                 {
-                    // RCLCPP_INFO(rclcpp::get_logger("nav2_costmap_2d"),
-                    //     "purgeOld: deleted observation class_id=%d  age=%.3fs > decay=%.3fs",
-                    //     static_cast<int>(class_id), age, decay_time_);
                     class_confidence_sums_[class_id] -= queue.front().confidence;
                     queue.pop_front();
                 }
@@ -1014,8 +1020,6 @@ class SegmentationBuffer
     double fov_outside_decay_time_;
     GroundPlaneFOVChecker ground_fov_checker_;
     // For throttled FOV logging (every 100 observations) and frustum coords
-    int observations_outside_fov_count_ = 0;
-    int observations_inside_fov_count_ = 0;
     double last_frustum_origin_x_ = 0.0;
     double last_frustum_origin_y_ = 0.0;
     double last_frustum_origin_z_ = 0.0;

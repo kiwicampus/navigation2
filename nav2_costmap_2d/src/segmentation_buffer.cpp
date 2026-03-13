@@ -344,15 +344,6 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
                         sample_outside_world_y = world.y;
                         has_sample_outside = true;
                     }
-                    ++observations_outside_fov_count_;
-                    // if (observations_outside_fov_count_ % 500 == 0)
-                    // {
-                    //     RCLCPP_INFO(logger_,
-                    //                 "SegmentationBuffer [%s]: observation OUTSIDE FOV (every 500th: #%d) -> "
-                    //                 "tile decay set to %.2fs | tile %d,%d world (%.2f, %.2f) |",
-                    //                 buffer_source_.c_str(), observations_outside_fov_count_, outside_decay,
-                    //                 tile.first.x, tile.first.y, world.x, world.y);
-                    // }
                 }
                 else
                 {
@@ -362,15 +353,6 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
                         sample_inside_world_y = world.y;
                         has_sample_inside = true;
                     }
-                    ++observations_inside_fov_count_;
-                    // if (observations_inside_fov_count_ % 500 == 0)
-                    // {
-                    //     RCLCPP_INFO(logger_,
-                    //                 "SegmentationBuffer [%s]: observation INSIDE FOV (every 500th: #%d) -> "
-                    //                 "tile decay set to %.2fs | tile %d,%d world (%.2f, %.2f) |",
-                    //                 buffer_source_.c_str(), observations_inside_fov_count_, inside_decay, tile.first.x,
-                    //                 tile.first.y, world.x, world.y);
-                    // }
                 }
                 tile.second.setDecayTime(inside ? inside_decay : outside_decay);
                 inside ? ++tiles_inside : ++tiles_outside;
@@ -378,11 +360,6 @@ void SegmentationBuffer::bufferSegmentation(const sensor_msgs::msg::PointCloud2&
             RCLCPP_DEBUG(logger_,
                          "SegmentationBuffer [%s] FOV decay applied: %d tiles inside (%.2fs), %d tiles outside (%.2fs)",
                          buffer_source_.c_str(), tiles_inside, inside_decay, tiles_outside, outside_decay);
-            RCLCPP_INFO_THROTTLE(
-                logger_, *clock_, 5000,
-                "SegmentationBuffer [%s] FOV summary: tiles_inside=%d tiles_outside=%d (running: inside=%d outside=%d)",
-                buffer_source_.c_str(), tiles_inside, tiles_outside, observations_inside_fov_count_,
-                observations_outside_fov_count_);
             if (tiles_inside == 0 && tiles_outside > 0 && has_sample_outside)
             {
                 RCLCPP_WARN_THROTTLE(logger_, *clock_, 5000,
