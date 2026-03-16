@@ -269,9 +269,6 @@ void SegmentationBuffer::bufferSegmentation(
             {
                 TileWorldXY world = temporal_tile_map_->indexToWorld(tile.first.x, tile.first.y);
                 const bool inside = ground_fov_checker_.isInFOV(world.x, world.y);
-                RCLCPP_INFO_THROTTLE(logger_, *clock_, 1000,
-                                    "ANALYZING POINT [%s]: -> tile %d,%d world(%.2f, %.2f) |",
-                                    buffer_source_.c_str(), tile.first.x, tile.first.y, world.x, world.y);
                 tile.second.setDecayTime(inside ? inside_decay : outside_decay);
                 inside ? ++tiles_inside : ++tiles_outside;
             }

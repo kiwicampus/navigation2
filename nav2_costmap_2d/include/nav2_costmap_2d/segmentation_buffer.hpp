@@ -105,7 +105,6 @@ struct TileWorldXY
  * @brief 2D ground-plane FOV checker for points at z=0.
  * Four corner rays → intersection with plane z=0. If intersection distance is outside [min_d, max_d],
  * substitutes the point at min_d or max_d along the ray (xy footprint). Always 4 vertices, ordered CCW.
- * Convention: camera Z forward, ±vFOV/2, ±hFOV/2.
  */
 class GroundPlaneFOVChecker
 {
@@ -176,9 +175,7 @@ private:
     }
 
     /**
-     * One point per ray on the ground footprint: ray ∩ z=0 when distance in [min_d, max_d];
-     * if t < min_d use point at min_d along ray; if t > max_d use max_d; if no forward
-     * intersection or horizontal ray, use max_d (horizon cap). Always returns a valid Vec2D.
+     * if t < min_d use point at min_d along ray; if t > max_d use max_d;
      */
     Vec2D rayGroundPointClamped(const Eigen::Vector3d& origin, const Eigen::Vector3d& dir) const
     {
