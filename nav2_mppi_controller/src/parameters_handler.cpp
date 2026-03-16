@@ -109,7 +109,9 @@ void ParametersHandler::updateParametersCallback(
       if (auto callback = get_param_callbacks_.find(param_name);
         callback != get_param_callbacks_.end())
       {
-        callback->second(param);
+        for (auto & cb : callback->second) {
+          cb(param);
+        }
       }
     }
     for (auto & post_cb : post_callbacks_) {

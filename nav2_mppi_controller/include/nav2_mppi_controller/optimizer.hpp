@@ -267,6 +267,7 @@ protected:
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
   nav2_costmap_2d::Costmap2D * costmap_;
   std::string name_;
+  std::string motion_model_name_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
 
   std::shared_ptr<MotionModel> motion_model_;
@@ -296,6 +297,8 @@ protected:
   rclcpp::Logger logger_{rclcpp::get_logger("MPPIController")};
 
   geometry_msgs::msg::Twist last_command_vel_;
+  bool optimizer_reset_requested_{false};
+  bool constraints_refresh_requested_{false};
 };
 
 }  // namespace mppi
