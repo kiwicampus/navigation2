@@ -208,8 +208,7 @@ void SemanticSegmentationLayer::onInitialize()
     auto segmentation_buffer = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
       node, source, class_types_string, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
       min_obstacle_distance, *tf_, global_frame_, sensor_frame,
-      tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map,
-      use_cost_selection,
+      tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map, use_cost_selection,
       camera_h_fov, camera_v_fov, camera_min_dist, camera_max_dist,
       fov_decay_time, outside_fov_decay_time, visualize_frustum_fov);
 
