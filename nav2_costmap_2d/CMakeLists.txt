@@ -81,6 +81,7 @@ set(dependencies
 ament_target_dependencies(nav2_costmap_2d_core
   ${dependencies}
 )
+target_link_libraries(nav2_costmap_2d_core Eigen3::Eigen)
 
 add_library(layers SHARED
   plugins/inflation_layer.cpp
