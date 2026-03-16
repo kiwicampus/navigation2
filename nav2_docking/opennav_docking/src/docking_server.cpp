@@ -657,7 +657,13 @@ void DockingServer::undockRobot()
 
     // Check if the robot is docked before proceeding
     if (dock->isCharger() && (!dock->isDocked() && !dock->isCharging())) {
-      RCLCPP_INFO(get_logger(), "Robot is not in the dock, no need to undock");
+      RCLCPP_INFO(
+        get_logger(),
+        "Robot is not in the dock, no need to undock. Dock status: isDocked=%s, isCharging=%s",
+        dock->isDocked() ? "true" : "false",
+        dock->isCharging() ? "true" : "false");
+      result->success = true;
+      undocking_action_server_->succeeded_current(result);
       return;
     }
 
@@ -668,6 +674,9 @@ void DockingServer::undockRobot()
     // Get "dock pose" by finding the robot pose
     geometry_msgs::msg::PoseStamped dock_pose = getRobotPoseInFrame(params_->fixed_frame);
 
+    RCLCPP_INFO(get_logger(), "Dock pose target: %f, %f, %f", dock_pose.pose.position.x, dock_pose.pose.position.y, tf2::getYaw(dock_pose.pose.orientation));
+    RCLCPP_INFO(get_logger(), "Dock pose frame target: %s", dock_pose.header.frame_id.c_str());
+
     // Make sure that the staging pose is pointing in the same direction when moving backwards
     if (dock_backward) {
       dock_pose.pose.orientation = nav2_util::geometry_utils::orientationAroundZAxis(
@@ -677,6 +686,8 @@ void DockingServer::undockRobot()
     // Get staging pose (in fixed frame)
     geometry_msgs::msg::PoseStamped staging_pose =
       dock->getStagingPose(dock_pose.pose, dock_pose.header.frame_id);
+
+    RCLCPP_INFO(get_logger(), "Staging pose result: %f, %f, %f", staging_pose.pose.position.x, staging_pose.pose.position.y, tf2::getYaw(staging_pose.pose.orientation));
 
     // If we performed a rotation before docking backward, we must rotate the staging pose
     // to match the robot orientation
