@@ -148,10 +148,7 @@ void SegmentationBuffer::bufferSegmentation(
     frustum_origin.z = global_origin.point.z;
 
     ground_fov_checker_.updatePose(frustum_origin, cam_tf.transform.rotation);
-    last_frustum_origin_x_ = frustum_origin.x;
-    last_frustum_origin_y_ = frustum_origin.y;
-    last_frustum_origin_z_ = frustum_origin.z;
-
+    
     std::vector<geometry_msgs::msg::Point> polygon = ground_fov_checker_.getGroundPolygonForVisualization();
 
     if (visualize_frustum_fov_ && frustum_fov_pub_)
