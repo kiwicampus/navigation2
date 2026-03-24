@@ -46,6 +46,10 @@
 #include "nav2_costmap_2d/footprint.hpp"
 #include "rclcpp/parameter_events_filter.hpp"
 
+#include <atomic>
+#include <chrono>
+#include <mutex>
+
 using nav2_costmap_2d::INSCRIBED_INFLATED_OBSTACLE;
 using nav2_costmap_2d::LETHAL_OBSTACLE;
 using nav2_costmap_2d::NO_INFORMATION;
@@ -123,7 +127,6 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "fov_decay_time", rclcpp::ParameterValue(-1.0));
     declareParameter(source + "." + "outside_fov_decay_time", rclcpp::ParameterValue(-1.0));
     declareParameter(source + "." + "visualize_frustum_fov", rclcpp::ParameterValue(false));
-
     node->get_parameter(name_ + "." + source + "." + "segmentation_topic", segmentation_topic);
     node->get_parameter(name_ + "." + source + "." + "confidence_topic", confidence_topic);
     node->get_parameter(name_ + "." + source + "." + "labels_topic", labels_topic);
@@ -319,24 +322,49 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
   }
   if (!enabled_)
   {
+    static std::atomic<int> disabled_log_count{0};
+    if (disabled_log_count.fetch_add(1) < 5) {
+      RCLCPP_WARN(
+        logger_,
+        "[SemanticSegmentationLayer DEBUG] updateBounds: layer disabled (enabled_=false); "
+        "profiler flag is NOT consumed until the layer is enabled.");
+    }
     return;
   }
 
-  std::vector<std::pair<SegmentationTileMap::SharedPtr, SegmentationBuffer::SharedPtr>> segmentation_tile_maps;
-  getSegmentationTileMaps(segmentation_tile_maps);
-
-  // Get current time for decay calculations
+  // Sim time: node->now() stays at 0 until /clock publishes (e.g. before bag play). Do not consume
+  // the one-shot profiler flag in that case — wait for a tick with valid time.
   auto node = node_.lock();
   if (!node) {
     RCLCPP_ERROR(logger_, "Failed to lock node in updateBounds");
     return;
   }
-  double current_time = node->now().seconds();
-  
-  // Check if the current time is valid
+  const double current_time = node->now().seconds();
   if (current_time <= 0.0) {
-    RCLCPP_WARN(logger_, "Invalid current time in updateBounds: %.3f", current_time);
+    // Do not use RCLCPP_WARN_THROTTLE with sim clock: time may stay at 0 until /clock runs.
+    static std::atomic<int> invalid_time_log_count{0};
+    if (invalid_time_log_count.fetch_add(1) < 6) {
+      RCLCPP_WARN(
+        logger_,
+        "[SemanticSegmentationLayer] updateBounds skipped: ROS time=%.3f (not ready; typical: use_sim_time "
+        "before bag /clock). Profiler flag not consumed.",
+        current_time);
+    }
     return;
+  }
+
+  using Clock = std::chrono::high_resolution_clock;
+  const Clock::time_point prof_update_t0 = Clock::now();
+  long long prof_getTileMaps_us = 0;
+  long long prof_purge_us = 0;
+  long long prof_tileLoop_us = 0;
+
+  std::vector<std::pair<SegmentationTileMap::SharedPtr, SegmentationBuffer::SharedPtr>> segmentation_tile_maps;
+  {
+    auto t0 = Clock::now();
+    getSegmentationTileMaps(segmentation_tile_maps);
+    prof_getTileMaps_us =
+      std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t0).count();
   }
 
   // Process each tile map one at a time
@@ -345,9 +373,14 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
     auto buffer = tile_map_pair.second;
     buffer->lock();
     
-    // Purge old observations in updateBounds before computing costs to ensure the costmap accurately reflects the current state after decay, maintaining consistency between the buffer and the costmap.
+    // Sole purge for segmentation tile maps: uses ROS time so observations decay every costmap
+    // tick even when no new point cloud arrives (bufferSegmentation does not call purge).
+    auto t_purge_begin = Clock::now();
     tile_map_pair.first->purgeOldObservations(current_time);
+    prof_purge_us +=
+      std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t_purge_begin).count();
         
+    auto t_tile_begin = Clock::now();
     for(auto& tile: *tile_map_pair.first)
     {
       // Check if the tile has valid observations after purge
@@ -376,10 +409,26 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
       }
       touch(tile_world_coords.x, tile_world_coords.y, min_x, min_y, max_x, max_y);
     }
+    prof_tileLoop_us +=
+      std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t_tile_begin).count();
     buffer->unlock();
   }
 
   current_ = true;
+
+  const auto prof_total_us =
+    std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - prof_update_t0).count();
+  // WARN: visible when launch uses --log-level warn. Log every updateBounds (each costmap tick).
+  RCLCPP_WARN(
+    logger_,
+    "[PROFILER] SemanticSegmentationLayer::updateBounds total=%ld us getTileMaps=%ld us purge=%ld us "
+    "tileLoop=%ld us tile_map_count=%zu ros_time=%.3f",
+    static_cast<long>(prof_total_us),
+    static_cast<long>(prof_getTileMaps_us),
+    static_cast<long>(prof_purge_us),
+    static_cast<long>(prof_tileLoop_us),
+    segmentation_tile_maps.size(),
+    current_time);
 }
 
 // The method is called when footprint was changed.
@@ -439,8 +488,25 @@ void SemanticSegmentationLayer::syncSegmPointcloudCb(
   const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
   const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer> & buffer)
 {
+  static std::atomic<int> sync_pc_trace_count{0};
+  const int trace_n = sync_pc_trace_count.fetch_add(1);
+  if (trace_n < 25) {
+    RCLCPP_ERROR(
+      logger_,
+      "[PROFILER-TRACE] syncSegmPointcloudCb #%d buffer=%s seg=%ux%u pc=%ux%u class_map_empty=%s",
+      trace_n, buffer->getBufferSource().c_str(),
+      segmentation->width, segmentation->height, pointcloud->width, pointcloud->height,
+      buffer->isClassIdCostMapEmpty() ? "true" : "false");
+  }
+
   if (segmentation->width * segmentation->height != pointcloud->width * pointcloud->height)
   {
+    if (trace_n < 25) {
+      RCLCPP_ERROR(
+        logger_,
+        "[PROFILER-TRACE] syncSegmPointcloudCb REJECT size_mismatch buffer=%s",
+        buffer->getBufferSource().c_str());
+    }
     RCLCPP_WARN(logger_,
                 "Pointcloud and segmentation sizes are different, will not buffer message. "
                 "segmentation->width:%u,  "
@@ -451,6 +517,12 @@ void SemanticSegmentationLayer::syncSegmPointcloudCb(
   unsigned expected_array_size = segmentation->width * segmentation->height;
   if (segmentation->data.size() < expected_array_size)
   {
+    if (trace_n < 25) {
+      RCLCPP_ERROR(
+        logger_,
+        "[PROFILER-TRACE] syncSegmPointcloudCb REJECT seg_data_small buffer=%s data=%zu expected=%u",
+        buffer->getBufferSource().c_str(), segmentation->data.size(), expected_array_size);
+    }
     RCLCPP_WARN(logger_,
                 "segmentation arrays have wrong sizes: data->%lu, expected->%u. "
                 "Will not buffer message",
@@ -459,17 +531,32 @@ void SemanticSegmentationLayer::syncSegmPointcloudCb(
   }
   if (buffer->isClassIdCostMapEmpty())
   {
+    if (trace_n < 25) {
+      RCLCPP_ERROR(
+        logger_,
+        "[PROFILER-TRACE] syncSegmPointcloudCb REJECT no_labelinfo buffer=%s",
+        buffer->getBufferSource().c_str());
+    }
     RCLCPP_WARN(logger_, "Class map is empty because a labelinfo message has not been received for topic %s. Will not buffer message", buffer->getBufferSource().c_str());
     return;
   }
+
   // if no confidence available, create a mask with all elements having max confidence
   // in this case the plugin thresholding will only work with the number of observations
   // accumulated in a given tile
   sensor_msgs::msg::Image conf_mask = *segmentation;
   std::fill(conf_mask.data.begin(), conf_mask.data.end(), 255);
+    RCLCPP_WARN(
+      logger_,
+      "[PROFILER-TRACE] syncSegmPointcloudCb -> bufferSegmentation buffer=%s frame=%s",
+      buffer->getBufferSource().c_str(), pointcloud->header.frame_id.c_str());
   buffer->lock();
   buffer->bufferSegmentation(*pointcloud, *segmentation, conf_mask);
   buffer->unlock();
+    RCLCPP_WARN(
+      logger_,
+      "[PROFILER-TRACE] syncSegmPointcloudCb <- bufferSegmentation returned buffer=%s",
+      buffer->getBufferSource().c_str());
 }
 
 void SemanticSegmentationLayer::syncSegmConfPointcloudCb(const std::shared_ptr<const sensor_msgs::msg::Image>& segmentation,
@@ -477,8 +564,27 @@ void SemanticSegmentationLayer::syncSegmConfPointcloudCb(const std::shared_ptr<c
                               const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
                               const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer)
 {
+  static std::atomic<int> sync_conf_trace_count{0};
+  const int trace_n = sync_conf_trace_count.fetch_add(1);
+  if (trace_n < 25) {
+    RCLCPP_ERROR(
+      logger_,
+      "[PROFILER-TRACE] syncSegmConfPointcloudCb #%d buffer=%s seg=%ux%u conf=%ux%u pc=%ux%u class_map_empty=%s",
+      trace_n, buffer->getBufferSource().c_str(),
+      segmentation->width, segmentation->height,
+      confidence->width, confidence->height,
+      pointcloud->width, pointcloud->height,
+      buffer->isClassIdCostMapEmpty() ? "true" : "false");
+  }
+
   if (segmentation->width * segmentation->height != pointcloud->width * pointcloud->height)
     {
+      if (trace_n < 25) {
+        RCLCPP_ERROR(
+          logger_,
+          "[PROFILER-TRACE] syncSegmConfPointcloudCb REJECT size_mismatch buffer=%s",
+          buffer->getBufferSource().c_str());
+      }
       RCLCPP_WARN(logger_,
                   "Pointcloud and segmentation sizes are different, will not buffer message. "
                   "segmentation->width:%u,  "
@@ -489,6 +595,12 @@ void SemanticSegmentationLayer::syncSegmConfPointcloudCb(const std::shared_ptr<c
     unsigned expected_array_size = segmentation->width * segmentation->height;
     if (segmentation->data.size() < expected_array_size)
     {
+      if (trace_n < 25) {
+        RCLCPP_ERROR(
+          logger_,
+          "[PROFILER-TRACE] syncSegmConfPointcloudCb REJECT seg_data_small buffer=%s",
+          buffer->getBufferSource().c_str());
+      }
       RCLCPP_WARN(logger_,
                   "segmentation arrays have wrong sizes: data->%lu, expected->%u. "
                   "Will not buffer message",
@@ -497,12 +609,31 @@ void SemanticSegmentationLayer::syncSegmConfPointcloudCb(const std::shared_ptr<c
     }
     if (buffer->isClassIdCostMapEmpty())
     {
+      if (trace_n < 25) {
+        RCLCPP_ERROR(
+          logger_,
+          "[PROFILER-TRACE] syncSegmConfPointcloudCb REJECT no_labelinfo buffer=%s",
+          buffer->getBufferSource().c_str());
+      }
       RCLCPP_WARN(logger_, "Class map is empty because a labelinfo message has not been received for topic %s. Will not buffer message", buffer->getBufferSource().c_str());
       return;
+    }
+
+    if (trace_n < 25) {
+      RCLCPP_ERROR(
+        logger_,
+        "[PROFILER-TRACE] syncSegmConfPointcloudCb -> bufferSegmentation buffer=%s frame=%s",
+        buffer->getBufferSource().c_str(), pointcloud->header.frame_id.c_str());
     }
     buffer->lock();
     buffer->bufferSegmentation(*pointcloud, *segmentation, *confidence);
     buffer->unlock();
+    if (trace_n < 25) {
+      RCLCPP_ERROR(
+        logger_,
+        "[PROFILER-TRACE] syncSegmConfPointcloudCb <- bufferSegmentation returned buffer=%s",
+        buffer->getBufferSource().c_str());
+    }
 }
 
 void SemanticSegmentationLayer::reset()
