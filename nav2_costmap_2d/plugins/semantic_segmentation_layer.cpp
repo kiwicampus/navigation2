@@ -56,6 +56,42 @@ using nav2_costmap_2d::NO_INFORMATION;
 
 namespace nav2_costmap_2d {
 
+namespace {
+// Debug-only helper: prints delta time between steps using RCLCPP_WARN.
+class StepDeltaTimer {
+public:
+  using Clock = std::chrono::high_resolution_clock;
+
+  StepDeltaTimer(const rclcpp::Logger& logger, const char* name, uint64_t seq)
+  : logger_(logger), name_(name), seq_(seq), prev_(Clock::now())
+  {
+  }
+
+  void step(const char* label)
+  {
+    const auto now = Clock::now();
+    const long delta_us =
+      std::chrono::duration_cast<std::chrono::microseconds>(now - prev_).count();
+    prev_ = now;
+    const double delta_ms = static_cast<double>(delta_us) / 1000.0;
+    RCLCPP_WARN(
+      logger_,
+      "The step '%s' took %ld μs (%.3f ms) [%s seq=%llu]",
+      label,
+      delta_us,
+      delta_ms,
+      name_,
+      static_cast<unsigned long long>(seq_));
+  }
+
+private:
+  rclcpp::Logger logger_;
+  const char* name_;
+  uint64_t seq_;
+  Clock::time_point prev_;
+};
+}  // namespace
+
 SemanticSegmentationLayer::SemanticSegmentationLayer() {}
 
 // This method is called at the end of plugin initialization.
@@ -315,6 +351,8 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
                                              double* min_x, double* min_y, double* max_x,
                                              double* max_y)
 {
+  StepDeltaTimer timing(logger_, "SemanticSegmentationLayer", 0);
+  timing.step("updateBounds");
   std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
   if (rolling_window_)
   {
@@ -332,55 +370,32 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
     return;
   }
 
-  // Sim time: node->now() stays at 0 until /clock publishes (e.g. before bag play). Do not consume
-  // the one-shot profiler flag in that case — wait for a tick with valid time.
+  std::vector<std::pair<SegmentationTileMap::SharedPtr, SegmentationBuffer::SharedPtr>> segmentation_tile_maps;
+  getSegmentationTileMaps(segmentation_tile_maps);
+
   auto node = node_.lock();
   if (!node) {
     RCLCPP_ERROR(logger_, "Failed to lock node in updateBounds");
     return;
   }
   const double current_time = node->now().seconds();
+  
   if (current_time <= 0.0) {
-    // Do not use RCLCPP_WARN_THROTTLE with sim clock: time may stay at 0 until /clock runs.
-    static std::atomic<int> invalid_time_log_count{0};
-    if (invalid_time_log_count.fetch_add(1) < 6) {
-      RCLCPP_WARN(
-        logger_,
-        "[SemanticSegmentationLayer] updateBounds skipped: ROS time=%.3f (not ready; typical: use_sim_time "
-        "before bag /clock). Profiler flag not consumed.",
-        current_time);
-    }
+    RCLCPP_WARN(logger_, "Invalid current time in updateBounds: %.3f", current_time);
     return;
   }
 
-  using Clock = std::chrono::high_resolution_clock;
-  const Clock::time_point prof_update_t0 = Clock::now();
-  long long prof_getTileMaps_us = 0;
-  long long prof_purge_us = 0;
-  long long prof_tileLoop_us = 0;
-
-  std::vector<std::pair<SegmentationTileMap::SharedPtr, SegmentationBuffer::SharedPtr>> segmentation_tile_maps;
-  {
-    auto t0 = Clock::now();
-    getSegmentationTileMaps(segmentation_tile_maps);
-    prof_getTileMaps_us =
-      std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t0).count();
-  }
-
   // Process each tile map one at a time
+  RCLCPP_WARN(logger_, "Processing %ld tile maps", segmentation_tile_maps.size());
   for (auto& tile_map_pair : segmentation_tile_maps)
   {
     auto buffer = tile_map_pair.second;
     buffer->lock();
     
-    // Sole purge for segmentation tile maps: uses ROS time so observations decay every costmap
-    // tick even when no new point cloud arrives (bufferSegmentation does not call purge).
-    auto t_purge_begin = Clock::now();
     tile_map_pair.first->purgeOldObservations(current_time);
-    prof_purge_us +=
-      std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t_purge_begin).count();
-        
-    auto t_tile_begin = Clock::now();
+    
+    timing.step("purgeOldObservations inside updateBounds");
+    RCLCPP_WARN(logger_, "Processing %d tiles", tile_map_pair.first->size());
     for(auto& tile: *tile_map_pair.first)
     {
       // Check if the tile has valid observations after purge
@@ -409,26 +424,14 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
       }
       touch(tile_world_coords.x, tile_world_coords.y, min_x, min_y, max_x, max_y);
     }
-    prof_tileLoop_us +=
-      std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - t_tile_begin).count();
+    timing.step("tile_loop_updateBounds_complete");
     buffer->unlock();
   }
+  timing.step("tile_maps_loop_updateBounds_complete");
 
   current_ = true;
 
-  const auto prof_total_us =
-    std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - prof_update_t0).count();
   // WARN: visible when launch uses --log-level warn. Log every updateBounds (each costmap tick).
-  RCLCPP_WARN(
-    logger_,
-    "[PROFILER] SemanticSegmentationLayer::updateBounds total=%ld us getTileMaps=%ld us purge=%ld us "
-    "tileLoop=%ld us tile_map_count=%zu ros_time=%.3f",
-    static_cast<long>(prof_total_us),
-    static_cast<long>(prof_getTileMaps_us),
-    static_cast<long>(prof_purge_us),
-    static_cast<long>(prof_tileLoop_us),
-    segmentation_tile_maps.size(),
-    current_time);
 }
 
 // The method is called when footprint was changed.

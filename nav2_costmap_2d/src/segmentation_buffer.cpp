@@ -228,12 +228,13 @@ void SegmentationBuffer::bufferSegmentation(
     local_origin.point.y = 0;
     local_origin.point.z = 0;
     tf2_buffer_.transform(local_origin, global_origin, global_frame_, tf_tolerance_);
-    timing.step("tf_transform_sensor_origin_to_global");
+    timing.step("1_tf_transform_sensor_origin_to_global");
 
     geometry_msgs::msg::TransformStamped cam_tf =
       tf2_buffer_.lookupTransform(global_frame_, origin_frame, cloud.header.stamp, tf_tolerance_);
-    timing.step("tf_lookup_sensor_in_global");
+    timing.step("2_tf_lookup_sensor_in_global");
 
+    if (fov_outside_decay_time_ > 0.0) {
     geometry_msgs::msg::Point frustum_origin;
     frustum_origin.x = global_origin.point.x;
     frustum_origin.y = global_origin.point.y;
@@ -241,12 +242,12 @@ void SegmentationBuffer::bufferSegmentation(
 
     ground_fov_checker_.updatePose(frustum_origin, cam_tf.transform.rotation);
     timing.step("fov_checker_update_pose");
-
-    std::vector<geometry_msgs::msg::Point> polygon =
-      ground_fov_checker_.getGroundPolygonForVisualization();
-    timing.step("fov_get_ground_polygon");
+    }
 
     if (visualize_frustum_fov_ && frustum_fov_pub_) {
+        std::vector<geometry_msgs::msg::Point> polygon =
+      ground_fov_checker_.getGroundPolygonForVisualization();
+      timing.step("fov_get_ground_polygon");
       visualization_msgs::msg::Marker marker;
       marker.header.frame_id = global_frame_;
       marker.header.stamp = cloud.header.stamp;
@@ -269,14 +270,12 @@ void SegmentationBuffer::bufferSegmentation(
         marker.points.push_back(polygon[1]);
       }
       frustum_fov_pub_->publish(marker);
-      timing.step("frustum_marker_publish");
-    } else {
-      timing.step("frustum_marker_skipped");
+      timing.step("fov_frustum_marker_publish");
     }
 
     sensor_msgs::msg::PointCloud2 global_frame_cloud;
     tf2_buffer_.transform(cloud, global_frame_cloud, global_frame_, tf_tolerance_);
-    timing.step("transform_pointcloud_to_global");
+    timing.step("3_transform_pointcloud_to_global");
 
     global_frame_cloud.header.stamp = cloud.header.stamp;
 
@@ -286,13 +285,10 @@ void SegmentationBuffer::bufferSegmentation(
     std::unordered_map<TileIndex, int> best_observations_idxs;
     double cloud_time_seconds =
       rclcpp::Time(cloud.header.stamp.sec, cloud.header.stamp.nanosec).seconds();
-    timing.step("iterators_and_cloud_time_ready");
+    RCLCPP_WARN(logger_, "cloud_time_seconds: %f", cloud_time_seconds);
+    //timing.step("iterators_and_cloud_time_ready");
 
     for (size_t v = 0; v < segmentation.height; v++) {
-      if ((v % 100u) == 0u) {
-        timing.step_pixel_rows_batch(v, segmentation.height);
-      }
-
       for (size_t u = 0; u < segmentation.width; u++) {
         int pixel_idx = v * segmentation.width + u;
         if (!std::isfinite(*(iter_z_global))) {
@@ -348,10 +344,11 @@ void SegmentationBuffer::bufferSegmentation(
         ++iter_z_global;
       }
     }
-    timing.step("pixel_loop_complete");
+    timing.step("4_pixel_for_loop_complete");
+    RCLCPP_WARN(logger_, "Processed %d pixels", segmentation.width * segmentation.height);
 
     temporal_tile_map_->lock();
-    timing.step("tile_map_locked");
+    timing.step("5_tile_map_locked");
 
     if (fov_outside_decay_time_ > 0.0) {
       const double inside_decay =
@@ -370,12 +367,9 @@ void SegmentationBuffer::bufferSegmentation(
         "SegmentationBuffer [%s] FOV decay applied: %d tiles inside (%.2fs), %d tiles outside (%.2fs)",
         buffer_source_.c_str(), tiles_inside, inside_decay, tiles_outside, outside_decay);
       timing.step("fov_decay_per_tile_done");
-    } else {
-      timing.step("fov_decay_skipped");
-    }
-
-    // Purge of expired observations is done only in SemanticSegmentationLayer::updateBounds
-    // (node->now()) so decay advances every costmap tick even without new clouds.
+    } 
+    temporal_tile_map_->purgeOldObservations(cloud_time_seconds);
+    timing.step("6_purge_old_observations_in_buffer_segmentation");
 
     for (auto& idx : best_observations_idxs) {
       int img_idx_for_best_obs = idx.second;
@@ -410,21 +404,21 @@ void SegmentationBuffer::bufferSegmentation(
           buffer_source_.c_str(), class_id, costmap_index.x, costmap_index.y);
       }
     }
-    timing.step("push_observations");
+    timing.step("7_push_observations");
 
     temporal_tile_map_->unlock();
-    timing.step("tile_map_unlocked");
+    timing.step("8_tile_map_unlocked");
 
     if (visualize_tile_map_) {
       sensor_msgs::msg::PointCloud2 tile_map_cloud =
         visualizeTemporalTileMap(*temporal_tile_map_, global_frame_, clock_->now());
       tile_map_pub_->publish(tile_map_cloud);
-      timing.step("tile_map_visualization_publish");
+      timing.step("9_tile_map_visualization_publish");
     } else {
-      timing.step("tile_map_visualization_skipped");
+      timing.step("9_tile_map_visualization_skipped");
     }
 
-    timing.step("bufferSegmentation_ok");
+    timing.step("10_bufferSegmentation_ok");
   } catch (const tf2::TransformException& ex) {
     timing.step("FAILED_tf_transform_exception");
     RCLCPP_ERROR(
@@ -432,22 +426,7 @@ void SegmentationBuffer::bufferSegmentation(
       "TF Exception that should never happen for sensor frame: %s, cloud frame: %s, %s",
       sensor_frame_.c_str(), cloud.header.frame_id.c_str(), ex.what());
     return;
-  } catch (const std::exception& ex) {
-    timing.step("FAILED_std_exception");
-    RCLCPP_ERROR(
-      logger_,
-      "SegmentationBuffer [%s] cloud %llu std::exception: %s",
-      buffer_source_.c_str(), static_cast<unsigned long long>(cloud_1based), ex.what());
-    throw;
-  } catch (...) {
-    timing.step("FAILED_unknown_exception");
-    RCLCPP_ERROR(
-      logger_,
-      "SegmentationBuffer [%s] cloud %llu unknown exception",
-      buffer_source_.c_str(), static_cast<unsigned long long>(cloud_1based));
-    throw;
-  }
-
+  } 
   last_updated_ = clock_->now();
 }
 

@@ -260,6 +260,12 @@ struct TileObservation {
     double timestamp;
 };
 
+/** Counters from TemporalObservationQueue::purgeOld (one tile, all class queues). */
+struct TemporalObservationPurgeStats {
+    std::size_t observations_examined{0};
+    std::size_t observations_purged{0};
+};
+
 /**
  * @brief Manages temporal observations with a decay mechanism, maintaining a sum of confidences.
  * Wraps multiple std::deque objects to store observations per class ID, allowing for efficient insertion and removal.
@@ -374,15 +380,16 @@ class TemporalObservationQueue
     /**
      * @brief Removes observations older than the decay time from all class queues.
      * @param current_time The current time for comparison.
+     * @return How many observations were age-checked at queue fronts and how many were removed.
      */
-    void purgeOld(double current_time)
+    TemporalObservationPurgeStats purgeOld(double current_time)
     {
+        TemporalObservationPurgeStats stats;
         // Iterate through all class queues and remove time-expired observations.
         // While doing so, maintain the running confidence sums and remove classes
         // whose queues become empty to preserve the invariant: if a class exists
         // in class_queues_, its queue size is >= 1.
         bool dominant_removed = false;
-
         for (auto it = class_queues_.begin(); it != class_queues_.end(); )
         {
             auto& queue = it->second;
@@ -392,11 +399,13 @@ class TemporalObservationQueue
             // updating the confidence sum accordingly.
             while (!queue.empty())
             {
+                stats.observations_examined++;
                 double age = current_time - queue.front().timestamp;
                 if (age > decay_time_)
                 {
                     class_confidence_sums_[class_id] -= queue.front().confidence;
                     queue.pop_front();
+                    stats.observations_purged++;
                 }
                 else
                 {
@@ -430,6 +439,7 @@ class TemporalObservationQueue
             if (it != class_queues_.end()) setDominant(dominant_class_id_, it->second.size());
             else resetDominant();
         }
+        return stats;
     }
 
 private:
@@ -595,19 +605,29 @@ class SegmentationTileMap {
         void purgeOldObservations(double current_time)
         {
             std::vector<TileIndex> tiles_to_remove;
+            const std::size_t tiles_before = tile_map_.size();
+            std::size_t total_examined = 0;
+            std::size_t total_purged = 0;
             for (auto& tile : tile_map_)
             {
-                tile.second.purgeOld(current_time);
-                if(tile.second.empty())
+                TemporalObservationPurgeStats s = tile.second.purgeOld(current_time);
+                total_examined += s.observations_examined;
+                total_purged += s.observations_purged;
+                if (tile.second.empty())
                 {
                     tiles_to_remove.emplace_back(tile.first);
                 }
             }
-            if(tile_map_.size() > 0)
-            for (auto& tile : tiles_to_remove)
+            for (auto& t : tiles_to_remove)
             {
-                tile_map_.erase(tile);
+                tile_map_.erase(t);
             }
+            RCLCPP_WARN(
+                rclcpp::get_logger("nav2_costmap_2d"),
+                "SegmentationTileMap purge: tiles_before=%zu tiles_after=%zu empty_tiles_removed=%zu "
+                "observations_examined=%zu observations_purged=%zu",
+                tiles_before, tile_map_.size(), tiles_to_remove.size(),
+                total_examined, total_purged);
         }
 };
 
