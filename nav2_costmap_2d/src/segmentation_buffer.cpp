@@ -140,6 +140,8 @@ void SegmentationBuffer::bufferSegmentation(
     local_origin.point.z = 0;
     tf2_buffer_.transform(local_origin, global_origin, global_frame_, tf_tolerance_);
     // Each costmap update cycle, after getting TF: update 2D FOV checker pose in global frame
+
+    if (fov_outside_decay_time_ > 0.0) {
     geometry_msgs::msg::TransformStamped cam_tf =
         tf2_buffer_.lookupTransform(global_frame_, origin_frame, cloud.header.stamp, tf_tolerance_);
     geometry_msgs::msg::Point frustum_origin;
@@ -148,11 +150,9 @@ void SegmentationBuffer::bufferSegmentation(
     frustum_origin.z = global_origin.point.z;
 
     ground_fov_checker_.updatePose(frustum_origin, cam_tf.transform.rotation);
-    
-    std::vector<geometry_msgs::msg::Point> polygon = ground_fov_checker_.getGroundPolygonForVisualization();
-
     if (visualize_frustum_fov_ && frustum_fov_pub_)
     {
+        std::vector<geometry_msgs::msg::Point> polygon = ground_fov_checker_.getGroundPolygonForVisualization();
         visualization_msgs::msg::Marker marker;
         marker.header.frame_id = global_frame_;
         marker.header.stamp = cloud.header.stamp;
@@ -179,6 +179,7 @@ void SegmentationBuffer::bufferSegmentation(
         }
         // else: 0 or 1 point -> leave points empty (frustum not visible on ground)
         frustum_fov_pub_->publish(marker);
+    }
     }
 
     sensor_msgs::msg::PointCloud2 global_frame_cloud;
