@@ -831,10 +831,10 @@ class SegmentationBuffer
                        double observation_keep_time, double expected_update_rate, double max_lookahead_distance,
                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer, std::string global_frame,
                        std::string sensor_frame, tf2::Duration tf_tolerance, double costmap_resolution,
-                       double tile_map_decay_time, bool visualize_tile_map = false, bool use_cost_selection = true,
-                       double camera_h_fov = 1.52, double camera_v_fov = 1.01, double camera_min_dist = 0.0,
-                       double camera_max_dist = 8.0, double fov_inside_decay_time = 5.0,
-                       double fov_outside_decay_time = 5.0, bool visualize_frustum_fov = false);
+                       double tile_map_decay_time, bool visualize_tile_map, bool use_cost_selection,
+                       double camera_h_fov, double camera_v_fov, double camera_min_dist,
+                       double camera_max_dist, double fov_inside_decay_time,
+                       double fov_outside_decay_time, bool visualize_frustum_fov);
 
     /**
      * @brief  Destructor... cleans up
@@ -947,7 +947,6 @@ class SegmentationBuffer
     // If true, select observation per tile using highest max_cost. If false, use highest confidence
     bool use_cost_selection_ = true;
 
-    // 2D ground FOV only (GroundPlaneFOVChecker); no 3D frustum
     double camera_h_fov_;
     double camera_v_fov_;
     double camera_min_dist_;
@@ -955,10 +954,6 @@ class SegmentationBuffer
     double fov_inside_decay_time_;
     double fov_outside_decay_time_;
     GroundPlaneFOVChecker ground_fov_checker_;
-    // For throttled FOV logging (every 100 observations) and frustum coords
-    double last_frustum_origin_x_ = 0.0;
-    double last_frustum_origin_y_ = 0.0;
-    double last_frustum_origin_z_ = 0.0;
 };
 }  // namespace nav2_costmap_2d
 #endif  // NAV2_COSTMAP_2D__SEGMENTATION_BUFFER_HPP_
