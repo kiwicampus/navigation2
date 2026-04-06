@@ -118,8 +118,7 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "use_cost_selection", rclcpp::ParameterValue(true));
     declareParameter(source + "." + "camera_horizontal_fov", rclcpp::ParameterValue(1.52));
     declareParameter(source + "." + "camera_vertical_fov", rclcpp::ParameterValue(1.01));
-    declareParameter(source + "." + "camera_min_dist", rclcpp::ParameterValue(1.0));
-    declareParameter(source + "." + "camera_max_dist", rclcpp::ParameterValue(3.0));
+    declareParameter(source + "." + "frustum_start_distance", rclcpp::ParameterValue(-1.0));
     declareParameter(source + "." + "fov_decay_time", rclcpp::ParameterValue(-1.0));
     declareParameter(source + "." + "outside_fov_decay_time", rclcpp::ParameterValue(-1.0));
     declareParameter(source + "." + "visualize_frustum_fov", rclcpp::ParameterValue(false));
@@ -138,11 +137,10 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + source + "." + "visualize_tile_map", visualize_tile_map);
     bool use_cost_selection = true;
     node->get_parameter(name_ + "." + source + "." + "use_cost_selection", use_cost_selection);
-    double camera_h_fov, camera_v_fov, camera_min_dist, camera_max_dist, fov_decay_time, outside_fov_decay_time;
+    double camera_h_fov, camera_v_fov, frustum_start_distance, fov_decay_time, outside_fov_decay_time;
     node->get_parameter(name_ + "." + source + "." + "camera_horizontal_fov", camera_h_fov);
     node->get_parameter(name_ + "." + source + "." + "camera_vertical_fov", camera_v_fov);
-    node->get_parameter(name_ + "." + source + "." + "camera_min_dist", camera_min_dist);
-    node->get_parameter(name_ + "." + source + "." + "camera_max_dist", camera_max_dist);
+    node->get_parameter(name_ + "." + source + "." + "frustum_start_distance", frustum_start_distance);
     node->get_parameter(name_ + "." + source + "." + "fov_decay_time", fov_decay_time);
     node->get_parameter(name_ + "." + source + "." + "outside_fov_decay_time", outside_fov_decay_time);
     bool visualize_frustum_fov = false;
@@ -209,7 +207,7 @@ void SemanticSegmentationLayer::onInitialize()
       node, source, class_types_string, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
       min_obstacle_distance, *tf_, global_frame_, sensor_frame,
       tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map, use_cost_selection,
-      camera_h_fov, camera_v_fov, camera_min_dist, camera_max_dist,
+      camera_h_fov, camera_v_fov, frustum_start_distance,
       fov_decay_time, outside_fov_decay_time, visualize_frustum_fov);
 
     segmentation_buffers_.push_back(segmentation_buffer);

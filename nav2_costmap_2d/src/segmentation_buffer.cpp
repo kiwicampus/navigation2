@@ -57,7 +57,7 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
                                        tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map, bool use_cost_selection,
-                                       double camera_h_fov, double camera_v_fov, double camera_min_dist, double camera_max_dist,
+                                       double camera_h_fov, double camera_v_fov, double frustum_start_distance,
                                        double fov_inside_decay_time, double fov_outside_decay_time, bool visualize_frustum_fov)
   : tf2_buffer_(tf2_buffer)
   , class_types_(class_types)
@@ -72,11 +72,10 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   , tf_tolerance_(tf_tolerance)
   , camera_h_fov_(camera_h_fov)
     , camera_v_fov_(camera_v_fov)
-    , camera_min_dist_(camera_min_dist)
-    , camera_max_dist_(camera_max_dist)
+    , frustum_start_distance_(frustum_start_distance)
     , fov_inside_decay_time_(fov_inside_decay_time)
     , fov_outside_decay_time_(fov_outside_decay_time)
-    , ground_fov_checker_(camera_h_fov, camera_v_fov, camera_min_dist, camera_max_dist)  // On init: 2D FOV checker
+    , ground_fov_checker_(camera_h_fov, camera_v_fov, frustum_start_distance, max_lookahead_distance)
 {
   auto node = parent.lock();
   clock_ = node->get_clock();
@@ -139,47 +138,45 @@ void SegmentationBuffer::bufferSegmentation(
     local_origin.point.y = 0;
     local_origin.point.z = 0;
     tf2_buffer_.transform(local_origin, global_origin, global_frame_, tf_tolerance_);
-    // Each costmap update cycle, after getting TF: update 2D FOV checker pose in global frame
 
+    // FOV path: update ground polygon and optional frustum marker when outside decay is enabled
     if (fov_outside_decay_time_ > 0.0) {
-    geometry_msgs::msg::TransformStamped cam_tf =
-        tf2_buffer_.lookupTransform(global_frame_, origin_frame, cloud.header.stamp, tf_tolerance_);
-    geometry_msgs::msg::Point frustum_origin;
-    frustum_origin.x = global_origin.point.x;
-    frustum_origin.y = global_origin.point.y;
-    frustum_origin.z = global_origin.point.z;
+        geometry_msgs::msg::TransformStamped cam_tf =
+            tf2_buffer_.lookupTransform(global_frame_, origin_frame, cloud.header.stamp, tf_tolerance_);
+        geometry_msgs::msg::Point frustum_origin;
+        frustum_origin.x = global_origin.point.x;
+        frustum_origin.y = global_origin.point.y;
+        frustum_origin.z = global_origin.point.z;
+        ground_fov_checker_.updatePose(frustum_origin, cam_tf.transform.rotation);
 
-    ground_fov_checker_.updatePose(frustum_origin, cam_tf.transform.rotation);
-    if (visualize_frustum_fov_ && frustum_fov_pub_)
-    {
-        std::vector<geometry_msgs::msg::Point> polygon = ground_fov_checker_.getGroundPolygonForVisualization();
-        visualization_msgs::msg::Marker marker;
-        marker.header.frame_id = global_frame_;
-        marker.header.stamp = cloud.header.stamp;
-        marker.ns = buffer_source_ + "_frustum";
-        marker.id = 0;
-        marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
-        marker.action = visualization_msgs::msg::Marker::ADD;
-        marker.scale.x = 0.05;
-        marker.color.r = 0.0f;
-        marker.color.g = 1.0f;
-        marker.color.b = 0.0f;
-        marker.color.a = 1.0f;
-        if (polygon.size() >= 3)
+        if (visualize_frustum_fov_ && frustum_fov_pub_)
         {
-            for (const auto& p : polygon)
-                marker.points.push_back(p);
-            marker.points.push_back(polygon.front());  // close the polygon
+            std::vector<geometry_msgs::msg::Point> polygon = ground_fov_checker_.getGroundPolygonForVisualization();
+            visualization_msgs::msg::Marker marker;
+            marker.header.frame_id = global_frame_;
+            marker.header.stamp = cloud.header.stamp;
+            marker.ns = buffer_source_ + "_frustum";
+            marker.id = 0;
+            marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+            marker.action = visualization_msgs::msg::Marker::ADD;
+            marker.scale.x = 0.05;
+            marker.color.r = 0.0f;
+            marker.color.g = 1.0f;
+            marker.color.b = 0.0f;
+            marker.color.a = 1.0f;
+            if (polygon.size() >= 3)
+            {
+                for (const auto& p : polygon)
+                    marker.points.push_back(p);
+                marker.points.push_back(polygon.front());  // close the polygon
+            }
+            else if (polygon.size() == 2)
+            {
+                marker.points.push_back(polygon[0]);
+                marker.points.push_back(polygon[1]);
+            }
+            frustum_fov_pub_->publish(marker);
         }
-        else if (polygon.size() == 2)
-        {
-            // Only 2 rays hit z=0 (other 2 "above horizon"); draw the segment so something is visible
-            marker.points.push_back(polygon[0]);
-            marker.points.push_back(polygon[1]);
-        }
-        // else: 0 or 1 point -> leave points empty (frustum not visible on ground)
-        frustum_fov_pub_->publish(marker);
-    }
     }
 
     sensor_msgs::msg::PointCloud2 global_frame_cloud;

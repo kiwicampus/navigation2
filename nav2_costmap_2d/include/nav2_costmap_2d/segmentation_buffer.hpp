@@ -40,6 +40,7 @@
 #include <list>
 #include <algorithm>
 #include <cmath>
+#include <utility>
 #include <optional>
 #include <string>
 #include <vector>
@@ -103,14 +104,17 @@ struct TileWorldXY
 
 /**
  * @brief 2D ground-plane FOV checker for points at z=0.
- * Four corner rays → intersection with plane z=0. If intersection distance is outside [min_d, max_d],
- * substitutes the point at min_d or max_d along the ray (xy footprint). Always 4 vertices, ordered CCW.
+ * Four corner rays → footprint on z=0. Along each ray, distance is capped by an effective max range:
+ * if both upper corner rays (sv=+1 in local build order) hit z=0, that cap is
+ * min(max_lookahead_distance, min(t_upper0, t_upper1)); otherwise max_lookahead_distance.
+ * frustum_start_distance: if < 0 or not declared, use geometric z=0 hits. If >= 0, the effective
+ * distance along the ray is max(t_z0, frustum_start_distance), capped by that effective max.
  */
 class GroundPlaneFOVChecker
 {
 public:
-    GroundPlaneFOVChecker(double hFOV, double vFOV, double min_dist, double max_dist)
-        : hFOV_(hFOV), vFOV_(vFOV), min_d_(min_dist), max_d_(max_dist)
+    GroundPlaneFOVChecker(double hFOV, double vFOV, double frustum_start_distance, double max_range)
+        : hFOV_(hFOV), vFOV_(vFOV), frustum_start_dist_(frustum_start_distance), max_range_(max_range)
     {
         buildLocalRays();
     }
@@ -147,7 +151,7 @@ public:
 private:
     struct Vec2D { double x, y; };
 
-    double hFOV_, vFOV_, min_d_, max_d_;
+    double hFOV_, vFOV_, frustum_start_dist_, max_range_;
     Eigen::Vector3d position_;
     Eigen::Quaterniond orientation_;
     std::vector<Eigen::Vector3d> local_rays_;
@@ -175,29 +179,39 @@ private:
     }
 
     /**
-     * if t < min_d use point at min_d along ray; if t > max_d use max_d;
+     * Ray parameter t where origin + t * d_unit hits z=0 in front (d_unit must be normalized).
+     * False if the ray is parallel to the plane, points up, or hits behind the origin.
      */
-    Vec2D rayGroundPointClamped(const Eigen::Vector3d& origin, const Eigen::Vector3d& dir) const
+    static bool distanceToZ0(const Eigen::Vector3d& origin, const Eigen::Vector3d& d_unit, double& t_out)
     {
         const double eps = 1e-9;
-        Eigen::Vector3d d = dir.normalized();
-
-        // Horizontal / upward: no single z=0 hit in front — cap at max_d for stable quad
-        if (d.z() >= -eps) {
-            return rayPointAtDistance(origin, d, max_d_);
+        if (d_unit.z() >= -eps) {
+            return false;
         }
-
-        const double t = -origin.z() / d.z();  // distance along ray to z=0
+        const double t = -origin.z() / d_unit.z();
         if (t <= 0.0) {
-            return rayPointAtDistance(origin, d, max_d_);
+            return false;
         }
-        if (t < min_d_) {
-            return rayPointAtDistance(origin, d, min_d_);
+        t_out = t;
+        return true;
+    }
+
+    /**
+     * Ground xy for one corner: uses a single precomputed z=0 hit (distanceToZ0 once per ray).
+     * frustum_start < 0: t_eff = t_z0. Else t_eff = max(t_z0, frustum_start). Clamped to max_along.
+     */
+    static Vec2D groundHit(
+        const Eigen::Vector3d& origin, const Eigen::Vector3d& d_unit, bool hit_z0, double t_z0,
+        double frustum_start_dist, double max_along)
+    {
+        if (!hit_z0) {
+            return rayPointAtDistance(origin, d_unit, max_along);
         }
-        if (t > max_d_) {
-            return rayPointAtDistance(origin, d, max_d_);
+        const double t_eff = std::max(t_z0, frustum_start_dist);
+        if (t_eff > max_along) {
+            return rayPointAtDistance(origin, d_unit, max_along);
         }
-        return Vec2D{origin.x() + t * d.x(), origin.y() + t * d.y()};
+        return rayPointAtDistance(origin, d_unit, t_eff);
     }
 
     /** Order 4 points CCW around centroid so LINE_STRIP closes without self-intersection. */
@@ -223,11 +237,23 @@ private:
             ground_polygon_.clear();
             return;
         }
+        Eigen::Vector3d world_dir[4];
+        bool hit_z0[4];
+        double t_z0[4];
+        for (size_t i = 0; i < 4u; ++i) {
+            world_dir[i] = (orientation_ * local_rays_[i]).normalized();
+            hit_z0[i] = distanceToZ0(position_, world_dir[i], t_z0[i]);
+        }
+        double eff_max = max_range_;
+        if (hit_z0[0] && hit_z0[1]) {
+            eff_max = std::min(max_range_, std::min(t_z0[0], t_z0[1]));
+            RCLCPP_WARN(rclcpp::get_logger("GroundPlaneFOVChecker"), "Both upper rays hit z=0: using effective max range %.2f (min of max_lookahead_distance and those hits)", eff_max);
+        }
         std::vector<Vec2D> candidates;
         candidates.reserve(4);
-        for (const auto& ray : local_rays_) {
-            Eigen::Vector3d world_dir = orientation_ * ray;
-            candidates.push_back(rayGroundPointClamped(position_, world_dir));
+        for (size_t i = 0; i < 4u; ++i) {
+            candidates.push_back(groundHit(
+                position_, world_dir[i], hit_z0[i], t_z0[i], frustum_start_dist_, eff_max));
         }
         ground_polygon_ = orderQuadCCW(std::move(candidates));
     }
@@ -832,9 +858,8 @@ class SegmentationBuffer
                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer, std::string global_frame,
                        std::string sensor_frame, tf2::Duration tf_tolerance, double costmap_resolution,
                        double tile_map_decay_time, bool visualize_tile_map, bool use_cost_selection,
-                       double camera_h_fov, double camera_v_fov, double camera_min_dist,
-                       double camera_max_dist, double fov_inside_decay_time,
-                       double fov_outside_decay_time, bool visualize_frustum_fov);
+                       double camera_h_fov, double camera_v_fov, double frustum_start_distance,
+                       double fov_inside_decay_time, double fov_outside_decay_time, bool visualize_frustum_fov);
 
     /**
      * @brief  Destructor... cleans up
@@ -949,8 +974,7 @@ class SegmentationBuffer
 
     double camera_h_fov_;
     double camera_v_fov_;
-    double camera_min_dist_;
-    double camera_max_dist_;
+    double frustum_start_distance_;
     double fov_inside_decay_time_;
     double fov_outside_decay_time_;
     GroundPlaneFOVChecker ground_fov_checker_;
