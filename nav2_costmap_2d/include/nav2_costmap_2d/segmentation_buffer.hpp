@@ -247,7 +247,6 @@ private:
         double eff_max = max_range_;
         if (hit_z0[0] && hit_z0[1]) {
             eff_max = std::min(max_range_, std::min(t_z0[0], t_z0[1]));
-            RCLCPP_WARN(rclcpp::get_logger("GroundPlaneFOVChecker"), "Both upper rays hit z=0: using effective max range %.2f (min of max_lookahead_distance and those hits)", eff_max);
         }
         std::vector<Vec2D> candidates;
         candidates.reserve(4);
