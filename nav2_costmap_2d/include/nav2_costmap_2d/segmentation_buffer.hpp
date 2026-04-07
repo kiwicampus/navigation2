@@ -108,7 +108,7 @@ struct TileWorldXY
  * if both upper corner rays (sv=+1 in local build order) hit z=0, that cap is
  * min(max_lookahead_distance, min(t_upper0, t_upper1)); otherwise max_lookahead_distance.
  * frustum_start_distance: if < 0 or not declared, use geometric z=0 hits. If >= 0, the effective
- * distance along the ray is max(t_z0, frustum_start_distance), capped by that effective max.
+ * distance along the ray is max(dist_z0, frustum_start_distance), capped by that effective max.
  */
 class GroundPlaneFOVChecker
 {
@@ -157,10 +157,10 @@ private:
     std::vector<Eigen::Vector3d> local_rays_;
     std::vector<Vec2D> ground_polygon_;
 
-    void buildLocalRays()
+    void buildLocalRays() // Build the four local rays that represent the four corners of the FOV
     {
         local_rays_.clear();
-        Eigen::Vector3d Z = Eigen::Vector3d::UnitZ();
+        Eigen::Vector3d Z = Eigen::Vector3d::UnitZ(); // Vector pointing away from the camera
         for (int sv : {1, -1}) {
             for (int sh : {1, -1}) {
                 Eigen::Affine3d rx(Eigen::AngleAxisd(sv * vFOV_ / 2.0, Eigen::Vector3d::UnitX()));
@@ -170,7 +170,7 @@ private:
         }
     }
 
-    /** xy of origin + dist * d (footprint for clamping when intersection is out of range). */
+    // Calculate the xy of the point on the ray at a given distance from the origin 
     static Vec2D rayPointAtDistance(
         const Eigen::Vector3d& origin, const Eigen::Vector3d& d_unit, double dist)
     {
@@ -178,40 +178,34 @@ private:
         return Vec2D{p.x(), p.y()};
     }
 
-    /**
-     * Ray parameter t where origin + t * d_unit hits z=0 in front (d_unit must be normalized).
-     * False if the ray is parallel to the plane, points up, or hits behind the origin.
-     */
+    // Find the distance along the ray to the z = 0 plane 
     static bool distanceToZ0(const Eigen::Vector3d& origin, const Eigen::Vector3d& d_unit, double& t_out)
     {
-        const double eps = 1e-9;
-        if (d_unit.z() >= -eps) {
+        const double eps = 1e-9; 
+        if (d_unit.z() >= -eps) { // The ray is parallel to the plane
             return false;
         }
-        const double t = -origin.z() / d_unit.z();
-        if (t <= 0.0) {
+        const double distance_to_z0 = -origin.z() / d_unit.z(); // Calculate the distance to the z = 0 plane 
+        if (distance_to_z0 <= 0.0) { // The ray hits behind the origin 
             return false;
         }
-        t_out = t;
+        t_out = distance_to_z0; 
         return true;
     }
 
-    /**
-     * Ground xy for one corner: uses a single precomputed z=0 hit (distanceToZ0 once per ray).
-     * frustum_start < 0: t_eff = t_z0. Else t_eff = max(t_z0, frustum_start). Clamped to max_along.
-     */
+    // Define which distance to use for the ground hit based on the hit_z0 flag
     static Vec2D groundHit(
-        const Eigen::Vector3d& origin, const Eigen::Vector3d& d_unit, bool hit_z0, double t_z0,
-        double frustum_start_dist, double max_along)
+        const Eigen::Vector3d& origin, const Eigen::Vector3d& d_unit, bool hit_z0, double dist_z0,
+        double frustum_start_dist, double frustum_end_dist)
     {
-        if (!hit_z0) {
-            return rayPointAtDistance(origin, d_unit, max_along);
+        if (!hit_z0) { // If the ray does not hit the z = 0 plane, use the max distance 
+            return rayPointAtDistance(origin, d_unit, frustum_end_dist);
         }
-        const double t_eff = std::max(t_z0, frustum_start_dist);
-        if (t_eff > max_along) {
-            return rayPointAtDistance(origin, d_unit, max_along);
+        const double t_start = std::max(dist_z0, frustum_start_dist); // Extract the farthest start distance of the frustum
+        if (t_start > frustum_end_dist) { 
+            return rayPointAtDistance(origin, d_unit, frustum_end_dist);
         }
-        return rayPointAtDistance(origin, d_unit, t_eff);
+        return rayPointAtDistance(origin, d_unit, t_start); 
     }
 
     /** Order 4 points CCW around centroid so LINE_STRIP closes without self-intersection. */
@@ -239,26 +233,26 @@ private:
         }
         Eigen::Vector3d world_dir[4];
         bool hit_z0[4];
-        double t_z0[4];
-        for (size_t i = 0; i < 4u; ++i) {
+        double dist_z0[4];
+        for (size_t i = 0; i < 4u; ++i) { // Find distance to z = 0 for each ray 
             world_dir[i] = (orientation_ * local_rays_[i]).normalized();
-            hit_z0[i] = distanceToZ0(position_, world_dir[i], t_z0[i]);
+            hit_z0[i] = distanceToZ0(position_, world_dir[i], dist_z0[i]);
         }
-        double eff_max = max_range_;
-        if (hit_z0[0] && hit_z0[1]) {
-            eff_max = std::min(max_range_, std::min(t_z0[0], t_z0[1]));
+        double frustum_end_dist = max_range_;
+        if (hit_z0[0] && hit_z0[1]) { // Upper corner rays hit z = 0, use the min of the two distances 
+            frustum_end_dist = std::min(max_range_, std::min(dist_z0[0], dist_z0[1]));
         }
         std::vector<Vec2D> candidates;
         candidates.reserve(4);
-        for (size_t i = 0; i < 4u; ++i) {
+        for (size_t i = 0; i < 4u; ++i) { // Calculate the ground hit for each ray 
             candidates.push_back(groundHit(
-                position_, world_dir[i], hit_z0[i], t_z0[i], frustum_start_dist_, eff_max));
+                position_, world_dir[i], hit_z0[i], dist_z0[i], frustum_start_dist_, frustum_end_dist));
         }
         ground_polygon_ = orderQuadCCW(std::move(candidates));
     }
 
     /**
-     * Point-in-polygon test. Polygon must be CCW (convex hull output).
+     * Point-in-polygon test. 
      * Cross product (b-a)×(p-a): positive => point to left of edge => INSIDE.
      * cross == 0 (on edge) treated as inside for robustness.
      */
