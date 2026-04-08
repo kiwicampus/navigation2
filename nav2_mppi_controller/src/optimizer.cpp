@@ -75,8 +75,6 @@ void Optimizer::shutdown()
 
 void Optimizer::getParams()
 {
-  std::string motion_model_name;
-
   auto & s = settings_;
   auto getParam = parameters_handler_->getParamGetter(name_);
   auto getParentParam = parameters_handler_->getParamGetter("");
@@ -136,14 +134,52 @@ void Optimizer::getParams()
       logger_,
       "Sign of the parameter ay_min is incorrect, consider setting it negative.");
   }
-
-
-  getParam(motion_model_name, "motion_model", std::string("DiffDrive"));
+  getParam(motion_model_name_, "motion_model", std::string("DiffDrive"));
 
   s.constraints = s.base_constraints;
 
-  setMotionModel(motion_model_name);
-  parameters_handler_->addPostCallback([this]() {reset();});
+  auto reset_cb = [this](const rclcpp::Parameter &)
+    {
+      optimizer_reset_requested_ = true;
+    };
+  const std::vector<std::string> reset_params = {
+    "model_dt", "time_steps", "batch_size", "motion_model",
+    "temperature", "gamma", "vx_std", "vy_std", "wz_std",
+    "retry_attempt_limit"
+  };
+  for (const auto & param : reset_params) {
+    parameters_handler_->addParamCallback(name_ + "." + param, reset_cb);
+  }
+
+  auto update_constraints_cb = [this](const rclcpp::Parameter &)
+    {
+      constraints_refresh_requested_ = true;
+    };
+  const std::vector<std::string> constraint_params = {
+    "vx_max", "vx_min", "vy_max", "wz_max", "ax_max",
+    "ax_min", "ay_max", "ay_min", "az_max"
+  };
+  for (const auto & param : constraint_params) {
+    parameters_handler_->addParamCallback(name_ + "." + param, update_constraints_cb);
+  }
+
+  parameters_handler_->addPostCallback(
+    [this]()
+    {
+      if (constraints_refresh_requested_) {
+        settings_.constraints = settings_.base_constraints;
+        motion_model_->initialize(settings_.constraints, settings_.model_dt);
+        constraints_refresh_requested_ = false;
+      }
+
+      if (optimizer_reset_requested_) {
+        setMotionModel(motion_model_name_);
+        reset();
+        optimizer_reset_requested_ = false;
+      }
+    });
+
+  setMotionModel(motion_model_name_);
 
   double controller_frequency;
   getParentParam(controller_frequency, "controller_frequency", 0.0, ParameterType::Static);

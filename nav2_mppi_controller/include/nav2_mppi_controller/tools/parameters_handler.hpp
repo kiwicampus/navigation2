@@ -189,7 +189,7 @@ protected:
   bool verbose_{false};
 
   std::unordered_map<std::string,
-    std::function<void(const rclcpp::Parameter &)>> get_param_callbacks_;
+    std::vector<std::function<void(const rclcpp::Parameter &)>>> get_param_callbacks_;
   std::unordered_map<std::string, std::function<get_param_func_t>> get_pre_callbacks_;
 
   std::vector<std::function<post_callback_t>> post_callbacks_;
@@ -209,7 +209,7 @@ inline auto ParametersHandler::getParamGetter(const std::string & ns)
 template<typename T>
 void ParametersHandler::addParamCallback(const std::string & name, T && callback)
 {
-  get_param_callbacks_[name] = callback;
+  get_param_callbacks_[name].push_back(callback);
 }
 
 template<typename T>
