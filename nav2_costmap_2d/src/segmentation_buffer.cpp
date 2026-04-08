@@ -57,7 +57,7 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
                                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer,
                                        std::string global_frame, std::string sensor_frame,
                                        tf2::Duration tf_tolerance, double costmap_resolution, double tile_map_decay_time, bool visualize_tile_map, bool use_cost_selection,
-                                       double camera_h_fov, double camera_v_fov, double frustum_start_distance,
+                                       double camera_h_fov, double camera_v_fov,
                                        double fov_inside_decay_time, double fov_outside_decay_time, bool visualize_frustum_fov)
   : tf2_buffer_(tf2_buffer)
   , class_types_(class_types)
@@ -72,10 +72,9 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   , tf_tolerance_(tf_tolerance)
   , camera_h_fov_(camera_h_fov)
     , camera_v_fov_(camera_v_fov)
-    , frustum_start_distance_(frustum_start_distance)
     , fov_inside_decay_time_(fov_inside_decay_time)
     , fov_outside_decay_time_(fov_outside_decay_time)
-    , ground_fov_checker_(camera_h_fov, camera_v_fov, frustum_start_distance, max_lookahead_distance)
+    , ground_fov_checker_(camera_h_fov, camera_v_fov, max_lookahead_distance)
 {
   auto node = parent.lock();
   clock_ = node->get_clock();

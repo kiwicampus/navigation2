@@ -107,14 +107,13 @@ struct TileWorldXY
  * Four corner rays → footprint on z=0. Along each ray, distance is capped by an effective max range:
  * if both upper corner rays (sv=+1 in local build order) hit z=0, that cap is
  * min(max_lookahead_distance, min(t_upper0, t_upper1)); otherwise max_lookahead_distance.
- * frustum_start_distance: if < 0 or not declared, use geometric z=0 hits. If >= 0, the effective
- * distance along the ray is max(dist_z0, frustum_start_distance), capped by that effective max.
+ * Along each ray: use z=0 intersection when valid, else clamp at frustum_end_dist.
  */
 class GroundPlaneFOVChecker
 {
 public:
-    GroundPlaneFOVChecker(double hFOV, double vFOV, double frustum_start_distance, double max_range)
-        : hFOV_(hFOV), vFOV_(vFOV), frustum_start_dist_(frustum_start_distance), max_range_(max_range)
+    GroundPlaneFOVChecker(double hFOV, double vFOV, double max_range)
+        : hFOV_(hFOV), vFOV_(vFOV), max_range_(max_range)
     {
         buildLocalRays();
     }
@@ -151,7 +150,7 @@ public:
 private:
     struct Vec2D { double x, y; };
 
-    double hFOV_, vFOV_, frustum_start_dist_, max_range_;
+    double hFOV_, vFOV_, max_range_;
     Eigen::Vector3d position_;
     Eigen::Quaterniond orientation_;
     std::vector<Eigen::Vector3d> local_rays_;
@@ -193,19 +192,18 @@ private:
         return true;
     }
 
-    // Define which distance to use for the ground hit based on the hit_z0 flag
+    // Ground xy: z=0 hit when valid, else point at frustum_end_dist along the ray.
     static Vec2D groundHit(
         const Eigen::Vector3d& origin, const Eigen::Vector3d& d_unit, bool hit_z0, double dist_z0,
-        double frustum_start_dist, double frustum_end_dist)
+        double frustum_end_dist)
     {
         if (!hit_z0) { // If the ray does not hit the z = 0 plane, use the max distance 
             return rayPointAtDistance(origin, d_unit, frustum_end_dist);
         }
-        const double t_start = std::max(dist_z0, frustum_start_dist); // Extract the farthest start distance of the frustum
-        if (t_start > frustum_end_dist) { 
+        if (dist_z0 > frustum_end_dist) {
             return rayPointAtDistance(origin, d_unit, frustum_end_dist);
         }
-        return rayPointAtDistance(origin, d_unit, t_start); 
+        return rayPointAtDistance(origin, d_unit, dist_z0);
     }
 
     /** Order 4 points CCW around centroid so LINE_STRIP closes without self-intersection. */
@@ -231,10 +229,10 @@ private:
             ground_polygon_.clear();
             return;
         }
-        Eigen::Vector3d world_dir[4];
-        bool hit_z0[4];
-        double dist_z0[4];
-        for (size_t i = 0; i < 4u; ++i) { // Find distance to z = 0 for each ray 
+        std::vector<Eigen::Vector3d> world_dir(4);
+        std::vector<bool> hit_z0(4);
+        std::vector<double> dist_z0(4);
+        for (size_t i = 0; i < 4u; ++i) { // Find distance to z = 0 for each ray
             world_dir[i] = (orientation_ * local_rays_[i]).normalized();
             hit_z0[i] = distanceToZ0(position_, world_dir[i], dist_z0[i]);
         }
@@ -246,7 +244,7 @@ private:
         candidates.reserve(4);
         for (size_t i = 0; i < 4u; ++i) { // Calculate the ground hit for each ray 
             candidates.push_back(groundHit(
-                position_, world_dir[i], hit_z0[i], dist_z0[i], frustum_start_dist_, frustum_end_dist));
+                position_, world_dir[i], hit_z0[i], dist_z0[i], frustum_end_dist));
         }
         ground_polygon_ = orderQuadCCW(std::move(candidates));
     }
@@ -851,7 +849,7 @@ class SegmentationBuffer
                        double min_lookahead_distance, tf2_ros::Buffer& tf2_buffer, std::string global_frame,
                        std::string sensor_frame, tf2::Duration tf_tolerance, double costmap_resolution,
                        double tile_map_decay_time, bool visualize_tile_map, bool use_cost_selection,
-                       double camera_h_fov, double camera_v_fov, double frustum_start_distance,
+                       double camera_h_fov, double camera_v_fov,
                        double fov_inside_decay_time, double fov_outside_decay_time, bool visualize_frustum_fov);
 
     /**
@@ -967,7 +965,6 @@ class SegmentationBuffer
 
     double camera_h_fov_;
     double camera_v_fov_;
-    double frustum_start_distance_;
     double fov_inside_decay_time_;
     double fov_outside_decay_time_;
     GroundPlaneFOVChecker ground_fov_checker_;
