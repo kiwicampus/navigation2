@@ -116,7 +116,12 @@ void SemanticSegmentationLayer::onInitialize()
     declareParameter(source + "." + "tile_map_decay_time", rclcpp::ParameterValue(5.0));
     declareParameter(source + "." + "visualize_tile_map", rclcpp::ParameterValue(false));
     declareParameter(source + "." + "use_cost_selection", rclcpp::ParameterValue(true));
-    
+    declareParameter(source + "." + "camera_horizontal_fov", rclcpp::ParameterValue(1.52));
+    declareParameter(source + "." + "camera_vertical_fov", rclcpp::ParameterValue(1.01));
+    declareParameter(source + "." + "fov_decay_time", rclcpp::ParameterValue(-1.0));
+    declareParameter(source + "." + "outside_fov_decay_time", rclcpp::ParameterValue(-1.0));
+    declareParameter(source + "." + "visualize_frustum_fov", rclcpp::ParameterValue(false));
+
     node->get_parameter(name_ + "." + source + "." + "segmentation_topic", segmentation_topic);
     node->get_parameter(name_ + "." + source + "." + "confidence_topic", confidence_topic);
     node->get_parameter(name_ + "." + source + "." + "labels_topic", labels_topic);
@@ -131,6 +136,13 @@ void SemanticSegmentationLayer::onInitialize()
     node->get_parameter(name_ + "." + source + "." + "visualize_tile_map", visualize_tile_map);
     bool use_cost_selection = true;
     node->get_parameter(name_ + "." + source + "." + "use_cost_selection", use_cost_selection);
+    double camera_h_fov, camera_v_fov, fov_decay_time, outside_fov_decay_time;
+    node->get_parameter(name_ + "." + source + "." + "camera_horizontal_fov", camera_h_fov);
+    node->get_parameter(name_ + "." + source + "." + "camera_vertical_fov", camera_v_fov);
+    node->get_parameter(name_ + "." + source + "." + "fov_decay_time", fov_decay_time);
+    node->get_parameter(name_ + "." + source + "." + "outside_fov_decay_time", outside_fov_decay_time);
+    bool visualize_frustum_fov = false;
+    node->get_parameter(name_ + "." + source + "." + "visualize_frustum_fov", visualize_frustum_fov);
     if (class_types_string.empty())
     {
       RCLCPP_ERROR(logger_, "no class types defined for source %s. Segmentation plugin cannot work this way", source.c_str());
@@ -192,8 +204,9 @@ void SemanticSegmentationLayer::onInitialize()
     auto segmentation_buffer = std::make_shared<nav2_costmap_2d::SegmentationBuffer>(
       node, source, class_types_string, class_map, observation_keep_time, expected_update_rate, max_obstacle_distance,
       min_obstacle_distance, *tf_, global_frame_, sensor_frame,
-      tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map,
-      use_cost_selection);
+      tf2::durationFromSec(transform_tolerance), getResolution(), tile_map_decay_time, visualize_tile_map, use_cost_selection,
+      camera_h_fov, camera_v_fov,
+      fov_decay_time, outside_fov_decay_time, visualize_frustum_fov);
 
     segmentation_buffers_.push_back(segmentation_buffer);
     
