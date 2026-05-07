@@ -8,6 +8,8 @@ find_package(backward_ros REQUIRED)
 
 ament_python_install_package(nav2_common)
 
+include(cmake/nav2_package.cmake)
+
 ament_package(
   CONFIG_EXTRAS "nav2_common-extras.cmake"
 )
