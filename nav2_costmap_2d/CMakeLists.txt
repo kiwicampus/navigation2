@@ -85,7 +85,6 @@ target_link_libraries(nav2_costmap_2d_core Eigen3::Eigen)
 
 add_library(layers SHARED
   plugins/inflation_layer.cpp
-  plugins/legacy_inflation_layer.cpp
   plugins/asymmetric_inflation_layer.cpp
   plugins/static_layer.cpp
   plugins/obstacle_layer.cpp
@@ -102,6 +101,7 @@ ament_target_dependencies(layers
 )
 target_link_libraries(layers
   ${PROJECT_NAME}::nav2_costmap_2d_core
+  Eigen3::Eigen
 )
 
 add_library(filters SHARED

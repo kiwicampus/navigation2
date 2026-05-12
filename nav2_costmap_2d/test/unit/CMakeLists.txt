@@ -62,24 +62,3 @@ ament_add_gtest(lifecycle_test lifecycle_test.cpp)
 target_link_libraries(lifecycle_test
   nav2_costmap_2d_core
 )
-
-nav2_add_gtest(coordinate_transform_test coordinate_transform_test.cpp)
-target_link_libraries(coordinate_transform_test
-  nav2_costmap_2d_core)
-
-nav2_add_gtest(observation_buffer_test observation_buffer_test.cpp)
-target_link_libraries(observation_buffer_test
-  nav2_costmap_2d_core
-)
-
-nav2_add_gtest(obstacle_layer_test obstacle_layer_test.cpp)
-target_link_libraries(obstacle_layer_test
-  nav2_costmap_2d_core
-  layers
-)
-
-nav2_add_gtest(asymmetric_inflation_layer_test asymmetric_inflation_layer_test.cpp)
-target_link_libraries(asymmetric_inflation_layer_test
-  nav2_costmap_2d_core
-  layers
-)

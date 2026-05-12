@@ -26,11 +26,11 @@
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
-#include "tf2_ros/buffer.hpp"
-#include "nav2_ros_common/lifecycle_node.hpp"
+#include "tf2_ros/buffer.h"
+#include "nav2_util/lifecycle_node.hpp"
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav2_costmap_2d/cost_values.hpp"
-#include "nav2_costmap_2d/inflation_layer_interface.hpp"
+#include "nav2_costmap_2d/inflation_layer.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "nav2_costmap_2d/asymmetric_inflation_layer.hpp"
 #include "geometry_msgs/msg/point.hpp"
@@ -53,7 +53,7 @@ public:
     cost_scaling_factor_right_ = right;
     cost_scaling_factor_ = std::max(left, right);
     need_reinflation_ = true;
-    setCurrent(false);
+    current_ = false;
     matchSize();
   }
 };
@@ -93,7 +93,7 @@ protected:
       {"observation_sources", std::string("")},
     });
 
-    node_ = std::make_shared<nav2::LifecycleNode>(
+    node_ = std::make_shared<nav2_util::LifecycleNode>(
       "asymmetric_inflation_test_node", "", options);
 
     tf_ = std::make_shared<tf2_ros::Buffer>(node_->get_clock());
@@ -147,7 +147,7 @@ protected:
     layer_->injectPath(path);
   }
 
-  nav2::LifecycleNode::SharedPtr node_;
+  std::shared_ptr<nav2_util::LifecycleNode> node_;
   std::shared_ptr<tf2_ros::Buffer> tf_;
   std::shared_ptr<nav2_costmap_2d::LayeredCostmap> layers_;
   std::shared_ptr<TestableAsymmetricInflationLayer> layer_;
@@ -212,9 +212,8 @@ TEST_F(AsymmetricInflationIntegrationTest, unequal_sides_raise_costs_from_standa
 
 TEST_F(AsymmetricInflationIntegrationTest, implements_inflation_layer_interface)
 {
-  std::shared_ptr<nav2_costmap_2d::Layer> base_layer = layer_;
   auto inflation_layer =
-    std::dynamic_pointer_cast<nav2_costmap_2d::InflationLayerInterface>(base_layer);
+    std::dynamic_pointer_cast<nav2_costmap_2d::InflationLayer>(layer_);
 
   ASSERT_NE(inflation_layer, nullptr);
   EXPECT_DOUBLE_EQ(inflation_layer->getInflationRadius(), 0.55);

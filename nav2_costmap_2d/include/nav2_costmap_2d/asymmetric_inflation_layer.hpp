@@ -25,6 +25,7 @@
 #include <cstdint>
 
 #include "rclcpp/rclcpp.hpp"
+#include "nav2_costmap_2d/distance_transform.hpp"
 #include "nav2_costmap_2d/inflation_layer.hpp"
 #include "nav_msgs/msg/path.hpp"
 
@@ -209,18 +210,12 @@ protected:
   void computeAsymmetricCaches();
 
   /**
-   * @brief Validate parameter updates (pre-set callback). Returns success/failure
-   * without mutating any state.
+   * @brief Dynamic parameter updates (inflation + asymmetric parameters).
    */
-  rcl_interfaces::msg::SetParametersResult validateParameterUpdatesCallback(
-    const std::vector<rclcpp::Parameter> & parameters);
+  rcl_interfaces::msg::SetParametersResult dynamicParametersCallback(
+    std::vector<rclcpp::Parameter> parameters);
 
-  /**
-   * @brief Apply parameter updates (post-set callback) after they have been validated.
-   * Recomputes caches when geometry parameters change.
-   */
-  void updateParametersCallback(
-    const std::vector<rclcpp::Parameter> & parameters);
+  int getOptimalThreadCount() const;
 
   // --- Parameters ---
   /// Exponential decay rate for cells on the LEFT side of the path
@@ -230,6 +225,8 @@ protected:
   /// Distance to goal where asymmetry disables to prevent docking oscillations
   double goal_distance_threshold_;
   std::string plan_topic_;
+  /// OpenMP thread count (-1 = auto); ignored without OpenMP
+  int num_threads_{-1};
 
   // --- State ---
   double current_robot_x_{0.0};
@@ -240,7 +237,7 @@ protected:
   std::vector<unsigned char> cost_lut_disfavored_;
 
   // --- Path subscription ---
-  nav2::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr path_sub_;
   nav_msgs::msg::Path::SharedPtr latest_global_path_;
   std::mutex path_mutex_;
 };

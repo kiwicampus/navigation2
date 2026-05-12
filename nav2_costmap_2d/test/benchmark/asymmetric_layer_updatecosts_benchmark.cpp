@@ -17,23 +17,18 @@
  * @brief Measures the per-update overhead of AsymmetricInflationLayer in a
  *        standalone path-aware inflation pipeline.
  *
- * Three fixtures are compared across the registered costmap sizes at
+ * Two full-map fixtures are compared across the registered costmap sizes at
  * 0.05 m/cell, 50 iterations each:
  *
  *   InflationFixture   — InflationLayer::updateCosts() alone
  *                        (the distance-transform symmetric baseline)
- *
- *   LegacyInflationFixture
- *                      — LegacyInflationLayer::updateCosts() alone
- *                        (the pre-DT symmetric baseline)
  *
  *   AsymmetricFixture  — AsymmetricInflationLayer::updateCosts() alone
  *                        (inherited distance-transform baseline plus
  *                        asymmetric overlay)
  *
  * Comparing AsymmetricFixture against InflationFixture shows the overlay
- * overhead on top of the DT baseline; LegacyInflationFixture keeps the old
- * symmetric algorithm visible as a separate reference point.
+ * overhead on top of the DT baseline.
  */
 
 #include <algorithm>
@@ -47,11 +42,10 @@
 #include "benchmark/benchmark.h"
 #include "rcutils/logging.h"
 #include "rclcpp/rclcpp.hpp"
-#include "nav2_ros_common/lifecycle_node.hpp"
+#include "nav2_util/lifecycle_node.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav2_costmap_2d/inflation_layer.hpp"
-#include "nav2_costmap_2d/legacy_inflation_layer.hpp"
 #include "nav2_costmap_2d/asymmetric_inflation_layer.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "geometry_msgs/msg/point.hpp"
@@ -220,7 +214,7 @@ public:
       rclcpp::Parameter("inflation.inflate_unknown", false),
       rclcpp::Parameter("inflation.inflate_around_unknown", false),
     });
-    node_ = std::make_shared<nav2::LifecycleNode>("inflation_benchmark", "", opts);
+    node_ = std::make_shared<nav2_util::LifecycleNode>("inflation_benchmark", "", opts);
 
     layers_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>(kGlobalFrame, false, false);
     layers_->resizeMap(width_, height_, kResolution, 0.0, 0.0);
@@ -242,7 +236,7 @@ public:
 
   unsigned int width_{0};
   unsigned int height_{0};
-  nav2::LifecycleNode::SharedPtr node_;
+  std::shared_ptr<nav2_util::LifecycleNode> node_;
   std::unique_ptr<nav2_costmap_2d::LayeredCostmap> layers_;
   std::shared_ptr<nav2_costmap_2d::InflationLayer> layer_;
 };
@@ -266,88 +260,6 @@ BENCHMARK_DEFINE_F(InflationFixture, UpdateCosts)(benchmark::State & state)
 }
 
 BENCHMARK_REGISTER_F(InflationFixture, UpdateCosts)
-->Args({60, 60})      // 3x3 m
-->Args({100, 100})    // 5x5 m
-->Args({200, 200})    // 10x10 m
-->Args({400, 400})    // 20x20 m
-->Args({800, 800})    // 40x40 m
-->Args({1600, 1600})  // 80x80 m
-->Args({3200, 3200})  // 160x160 m
-->Args({6400, 6400})  // 320x320 m
-->Args({12800, 12800})  // 640x640 m
-->Iterations(50)
-->Unit(benchmark::kMillisecond);
-
-// ---------------------------------------------------------------------------
-// Baseline: LegacyInflationLayer alone
-// ---------------------------------------------------------------------------
-
-/**
- * @brief Fixture for the legacy baseline pipeline: LegacyInflationLayer only.
- *
- * Benchmark arguments: {width_cells, height_cells}.
- */
-class LegacyInflationFixture : public benchmark::Fixture
-{
-public:
-  void SetUp(benchmark::State & state) override
-  {
-    width_ = static_cast<unsigned int>(state.range(0));
-    height_ = static_cast<unsigned int>(state.range(1));
-
-    auto opts = rclcpp::NodeOptions().parameter_overrides(
-    {
-      rclcpp::Parameter("legacy_inflation.inflation_radius", kInflationRadius),
-      rclcpp::Parameter("legacy_inflation.cost_scaling_factor", kCostScalingFactor),
-      rclcpp::Parameter("legacy_inflation.inflate_unknown", false),
-      rclcpp::Parameter("legacy_inflation.inflate_around_unknown", false),
-    });
-    node_ = std::make_shared<nav2::LifecycleNode>("legacy_inflation_benchmark", "", opts);
-
-    layers_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>(kGlobalFrame, false, false);
-    layers_->resizeMap(width_, height_, kResolution, 0.0, 0.0);
-
-    layer_ = std::make_shared<nav2_costmap_2d::LegacyInflationLayer>();
-    layer_->initialize(layers_.get(), "legacy_inflation", nullptr, node_, nullptr);
-    layers_->addPlugin(std::static_pointer_cast<nav2_costmap_2d::Layer>(layer_));
-    layers_->setFootprint(makeFootprint());
-
-    generateRectangularObstacles(*layers_->getCostmap(), kOccupancy);
-  }
-
-  void TearDown(benchmark::State &) override
-  {
-    layer_.reset();
-    layers_.reset();
-    node_.reset();
-  }
-
-  unsigned int width_{0};
-  unsigned int height_{0};
-  nav2::LifecycleNode::SharedPtr node_;
-  std::unique_ptr<nav2_costmap_2d::LayeredCostmap> layers_;
-  std::shared_ptr<nav2_costmap_2d::LegacyInflationLayer> layer_;
-};
-
-BENCHMARK_DEFINE_F(LegacyInflationFixture, UpdateCosts)(benchmark::State & state)
-{
-  auto * costmap = layers_->getCostmap();
-  const int w = static_cast<int>(width_);
-  const int h = static_cast<int>(height_);
-
-  for (auto _ : state) {
-    state.PauseTiming();
-    generateRectangularObstacles(*costmap, kOccupancy);
-    state.ResumeTiming();
-
-    layer_->updateCosts(*costmap, 0, 0, w, h);
-  }
-
-  state.counters["cells"] = static_cast<double>(width_) * static_cast<double>(height_);
-  state.counters["map_side_m"] = static_cast<double>(width_) * kResolution;
-}
-
-BENCHMARK_REGISTER_F(LegacyInflationFixture, UpdateCosts)
 ->Args({60, 60})      // 3x3 m
 ->Args({100, 100})    // 5x5 m
 ->Args({200, 200})    // 10x10 m
@@ -394,7 +306,7 @@ public:
       rclcpp::Parameter(
         "asymmetric_inflation_layer.plan_topic", std::string("/benchmark_asymmetric_plan")),
     });
-    node_ = std::make_shared<nav2::LifecycleNode>("asymmetric_benchmark", "", opts);
+    node_ = std::make_shared<nav2_util::LifecycleNode>("asymmetric_benchmark", "", opts);
 
     layers_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>(kGlobalFrame, false, false);
     layers_->resizeMap(width_, height_, kResolution, 0.0, 0.0);
@@ -419,7 +331,7 @@ public:
 
   unsigned int width_{0};
   unsigned int height_{0};
-  nav2::LifecycleNode::SharedPtr node_;
+  std::shared_ptr<nav2_util::LifecycleNode> node_;
   std::unique_ptr<nav2_costmap_2d::LayeredCostmap> layers_;
   std::shared_ptr<BenchmarkAsymmetricInflationLayer> asym_layer_;
 
@@ -512,7 +424,7 @@ public:
       rclcpp::Parameter("inflation.inflate_unknown", false),
       rclcpp::Parameter("inflation.inflate_around_unknown", false),
     });
-    node_ = std::make_shared<nav2::LifecycleNode>("incremental_inflation_benchmark", "", opts);
+    node_ = std::make_shared<nav2_util::LifecycleNode>("incremental_inflation_benchmark", "", opts);
 
     layers_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>(kGlobalFrame, false, false);
     layers_->resizeMap(width_, height_, kResolution, 0.0, 0.0);
@@ -538,7 +450,7 @@ public:
   unsigned int width_{0};
   unsigned int height_{0};
   unsigned int patch_{0};
-  nav2::LifecycleNode::SharedPtr node_;
+  std::shared_ptr<nav2_util::LifecycleNode> node_;
   std::unique_ptr<nav2_costmap_2d::LayeredCostmap> layers_;
   std::shared_ptr<nav2_costmap_2d::InflationLayer> layer_;
 };
@@ -571,105 +483,6 @@ BENCHMARK_DEFINE_F(IncrementalInflationFixture, UpdateCosts)(benchmark::State & 
 }
 
 BENCHMARK_REGISTER_F(IncrementalInflationFixture, UpdateCosts)
-->Args({800, 800, 100})    // 40×40 m map, ~5 m patch
-->Args({800, 800, 200})    // 40×40 m map, ~10 m patch
-->Args({1600, 1600, 100})  // 80×80 m map, ~5 m patch
-->Args({1600, 1600, 200})  // 80×80 m map, ~10 m patch
-->Args({3200, 3200, 100})  // 160×160 m map, ~5 m patch
-->Args({3200, 3200, 200})  // 160×160 m map, ~10 m patch
-->Args({6400, 6400, 100})  // 320×320 m map, ~5 m patch
-->Args({6400, 6400, 200})  // 320×320 m map, ~10 m patch
-->Args({12800, 12800, 100})  // 640×640 m map, ~5 m patch
-->Args({12800, 12800, 200})  // 640×640 m map, ~10 m patch
-->Args({25600, 25600, 100})  // 1280×1280 m map, ~5 m patch
-->Args({25600, 25600, 200})  // 1280×1280 m map, ~10 m patch
-->Iterations(50)
-->Unit(benchmark::kMillisecond);
-
-// ---------------------------------------------------------------------------
-// Incremental: LegacyInflationLayer with a small dirty window
-// ---------------------------------------------------------------------------
-
-/**
- * @brief Fixture for incremental updates: LegacyInflationLayer only.
- *
- * Benchmark arguments: {width_cells, height_cells, patch_side_cells}.
- */
-class IncrementalLegacyInflationFixture : public benchmark::Fixture
-{
-public:
-  void SetUp(benchmark::State & state) override
-  {
-    width_ = static_cast<unsigned int>(state.range(0));
-    height_ = static_cast<unsigned int>(state.range(1));
-    patch_ = static_cast<unsigned int>(state.range(2));
-
-    auto opts = rclcpp::NodeOptions().parameter_overrides(
-    {
-      rclcpp::Parameter("legacy_inflation.inflation_radius", kInflationRadius),
-      rclcpp::Parameter("legacy_inflation.cost_scaling_factor", kCostScalingFactor),
-      rclcpp::Parameter("legacy_inflation.inflate_unknown", false),
-      rclcpp::Parameter("legacy_inflation.inflate_around_unknown", false),
-    });
-    node_ =
-      std::make_shared<nav2::LifecycleNode>("incremental_legacy_inflation_benchmark", "", opts);
-
-    layers_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>(kGlobalFrame, false, false);
-    layers_->resizeMap(width_, height_, kResolution, 0.0, 0.0);
-
-    layer_ = std::make_shared<nav2_costmap_2d::LegacyInflationLayer>();
-    layer_->initialize(layers_.get(), "legacy_inflation", nullptr, node_, nullptr);
-    layers_->addPlugin(std::static_pointer_cast<nav2_costmap_2d::Layer>(layer_));
-    layers_->setFootprint(makeFootprint());
-
-    // Pre-warm: full update to put the layer in a valid post-update state.
-    auto * costmap = layers_->getCostmap();
-    generateRectangularObstacles(*costmap, kOccupancy);
-    layer_->updateCosts(*costmap, 0, 0, static_cast<int>(width_), static_cast<int>(height_));
-  }
-
-  void TearDown(benchmark::State &) override
-  {
-    layer_.reset();
-    layers_.reset();
-    node_.reset();
-  }
-
-  unsigned int width_{0};
-  unsigned int height_{0};
-  unsigned int patch_{0};
-  nav2::LifecycleNode::SharedPtr node_;
-  std::unique_ptr<nav2_costmap_2d::LayeredCostmap> layers_;
-  std::shared_ptr<nav2_costmap_2d::LegacyInflationLayer> layer_;
-};
-
-BENCHMARK_DEFINE_F(IncrementalLegacyInflationFixture, UpdateCosts)(benchmark::State & state)
-{
-  auto * costmap = layers_->getCostmap();
-  const unsigned int max_ox = (width_ > patch_) ? width_ - patch_ : 0u;
-  const unsigned int max_oy = (height_ > patch_) ? height_ - patch_ : 0u;
-  unsigned int step = 0;
-
-  for (auto _ : state) {
-    state.PauseTiming();
-    const unsigned int ox = max_ox ? (step * 37u) % max_ox : 0u;
-    const unsigned int oy = max_oy ? (step * 53u) % max_oy : 0u;
-    modifyPatch(*costmap, ox, oy, patch_, kObstacleSeed + step);
-    ++step;
-    state.ResumeTiming();
-
-    layer_->updateCosts(
-      *costmap,
-      static_cast<int>(ox), static_cast<int>(oy),
-      static_cast<int>(ox + patch_), static_cast<int>(oy + patch_));
-  }
-
-  state.counters["cells"] = static_cast<double>(width_) * static_cast<double>(height_);
-  state.counters["patch_side_m"] = static_cast<double>(patch_) * kResolution;
-  state.counters["map_side_m"] = static_cast<double>(width_) * kResolution;
-}
-
-BENCHMARK_REGISTER_F(IncrementalLegacyInflationFixture, UpdateCosts)
 ->Args({800, 800, 100})    // 40×40 m map, ~5 m patch
 ->Args({800, 800, 200})    // 40×40 m map, ~10 m patch
 ->Args({1600, 1600, 100})  // 80×80 m map, ~5 m patch
@@ -729,7 +542,7 @@ public:
       rclcpp::Parameter(
         "asymmetric_inflation_layer.plan_topic", std::string("/benchmark_incr_asymmetric_plan")),
     });
-    node_ = std::make_shared<nav2::LifecycleNode>("incremental_asymmetric_benchmark", "", opts);
+    node_ = std::make_shared<nav2_util::LifecycleNode>("incremental_asymmetric_benchmark", "", opts);
 
     layers_ = std::make_unique<nav2_costmap_2d::LayeredCostmap>(kGlobalFrame, false, false);
     layers_->resizeMap(width_, height_, kResolution, 0.0, 0.0);
@@ -762,7 +575,7 @@ public:
   double fixed_path_length_m_{0.0};
   double actual_path_length_m_{0.0};
   std::size_t path_pose_count_{0};
-  nav2::LifecycleNode::SharedPtr node_;
+  std::shared_ptr<nav2_util::LifecycleNode> node_;
   std::unique_ptr<nav2_costmap_2d::LayeredCostmap> layers_;
   std::shared_ptr<BenchmarkAsymmetricInflationLayer> asym_layer_;
 
@@ -874,12 +687,8 @@ int main(int argc, char ** argv)
 
   auto ret =
     rcutils_logging_set_logger_level("inflation_benchmark", RCUTILS_LOG_SEVERITY_ERROR);
-  ret = rcutils_logging_set_logger_level("legacy_inflation_benchmark",
-    RCUTILS_LOG_SEVERITY_ERROR);
   ret = rcutils_logging_set_logger_level("asymmetric_benchmark", RCUTILS_LOG_SEVERITY_ERROR);
   ret = rcutils_logging_set_logger_level("incremental_inflation_benchmark",
-    RCUTILS_LOG_SEVERITY_ERROR);
-  ret = rcutils_logging_set_logger_level("incremental_legacy_inflation_benchmark",
     RCUTILS_LOG_SEVERITY_ERROR);
   ret = rcutils_logging_set_logger_level("incremental_asymmetric_benchmark",
     RCUTILS_LOG_SEVERITY_ERROR);
