@@ -31,6 +31,7 @@
 #include "tf2_ros/buffer.hpp"
 #include "pluginlib/class_loader.hpp"
 
+#include "geometry_msgs/msg/accel_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
@@ -215,6 +216,12 @@ protected:
   void generateNoisedTrajectories();
 
   /**
+   * @brief Apply inter-iteration dynamic feasibility constraints on the
+   * first control sequence element before noise generation
+   */
+  void applyControlSequenceInterIterationConstraints();
+
+  /**
    * @brief Apply hard vehicle constraints on control sequence
    */
   void applyControlSequenceConstraints();
@@ -277,10 +284,10 @@ protected:
   bool isHolonomic() const;
 
   /**
-   * @brief Using control frequencies and time step size, determine if trajectory
+   * @brief Using control period and time step size, determine if trajectory
    * offset should be used to populate initial state of the next cycle
    */
-  void setOffset(double controller_frequency);
+  void setOffset(double controller_period);
 
   /**
    * @brief Perform fallback behavior to try to recover from a set of trajectories in collision
@@ -293,6 +300,7 @@ protected:
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
   nav2_costmap_2d::Costmap2D * costmap_;
   std::string name_;
+  std::string motion_model_name_;
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
 
   std::shared_ptr<MotionModel> motion_model_;
@@ -301,6 +309,7 @@ protected:
   CriticManager critic_manager_;
   NoiseGenerator noise_generator_;
 
+  std::unique_ptr<pluginlib::ClassLoader<MotionModel>> motion_model_loader_;
   std::unique_ptr<pluginlib::ClassLoader<OptimalTrajectoryValidator>> validator_loader_;
   OptimalTrajectoryValidator::Ptr trajectory_validator_;
 
@@ -322,6 +331,8 @@ protected:
   rclcpp::Logger logger_{rclcpp::get_logger("MPPIController")};
 
   geometry_msgs::msg::Twist last_command_vel_;
+  bool optimizer_reset_requested_{false};
+  bool constraints_refresh_requested_{false};
 };
 
 }  // namespace mppi
