@@ -77,14 +77,10 @@ ResultStatus Spin::onRun(const std::shared_ptr<const SpinActionGoal> command)
 
   // Check if current pose is collision-free before attempting to spin
   if (!cmd_disable_collision_checks_) {
-    geometry_msgs::msg::Pose2D pose2d;
-    pose2d.x = current_pose.pose.position.x;
-    pose2d.y = current_pose.pose.position.y;
-    pose2d.theta = prev_yaw_;
-
-    if (!local_collision_checker_->isCollisionFree(pose2d, true)) {
-      RCLCPP_WARN(logger_, "Robot is on a deadly pixel - cannot spin. Exiting immediately.");
-      return ResultStatus{Status::FAILED, SpinActionResult::COLLISION_AHEAD};
+    if (!local_collision_checker_->isCollisionFree(current_pose.pose, true)) {
+      std::string error_msg = "Robot is on a deadly pixel - cannot spin. Exiting immediately.";
+      RCLCPP_WARN(logger_, error_msg.c_str());
+      return ResultStatus{Status::FAILED, SpinActionResult::COLLISION_AHEAD, error_msg};
     }
   }
 
