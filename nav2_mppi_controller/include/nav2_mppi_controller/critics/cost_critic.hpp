@@ -81,6 +81,31 @@ protected:
   }
 
   /**
+    * @brief Get the cost for threshold checking (footprint-aware)
+    * @param x X of pose
+    * @param y Y of pose
+    * @param theta theta of pose
+    * @return float cost value for threshold comparison
+    */
+  inline float getPoseCost(float x, float y, float theta)
+  {
+    if (consider_footprint_) {
+      // Use footprint cost for threshold when footprint checking is enabled
+      return static_cast<float>(collision_checker_.footprintCostAtPose(
+          static_cast<double>(x), static_cast<double>(y), static_cast<double>(theta),
+          costmap_ros_->getRobotFootprint()));
+    } else {
+      // Fall back to center-point cost when footprint checking is disabled
+      unsigned int x_i, y_i;
+      if (!worldToMapFloat(x, y, x_i, y_i)) {
+        return 255.0f;  // NO_INFORMATION in float
+      }
+      auto * costmap = collision_checker_.getCostmap();
+      return static_cast<float>(costmap->getCost(getIndex(x_i, y_i)));
+    }
+  }
+
+  /**
     * @brief Find the min cost of the inflation decay function for which the robot MAY be
     * in collision in any orientation
     * @param costmap Costmap2DROS to get minimum inscribed cost (e.g. 128 in inflation layer documentation)
@@ -144,6 +169,7 @@ protected:
   std::string inflation_layer_name_;
 
   unsigned int power_{0};
+  bool legacy_near_collision_cost_check{false};
 };
 
 }  // namespace mppi::critics
