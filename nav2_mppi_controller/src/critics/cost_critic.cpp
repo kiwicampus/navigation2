@@ -80,7 +80,9 @@ void CostCritic::initialize()
     "Critic will collision check based on %s cost.",
     power_, critical_cost_, weight_, consider_footprint_ ?
     "footprint" : "circular");
-  RCLCPP_INFO(logger_, "Legacy mode (does not use footprint cost for near collision checking) is %s", legacy_near_collision_cost_check ? "enabled" : "disabled");
+  RCLCPP_INFO(logger_,
+    "Legacy mode (does not use footprint cost for near collision checking) is %s",
+    legacy_near_collision_cost_check ? "enabled" : "disabled");
 }
 
 float CostCritic::findCircumscribedCost(
@@ -219,8 +221,7 @@ void CostCritic::score(CriticData & data)
             traj_cost += pose_cost;  // Keep using center-point cost for progressive penalties
           }
         }
-      }
-      else {
+      } else {
         // Let near-collision trajectory points be punished severely
         // Note that we collision check based on the footprint actual,
         // but score based on the center-point cost regardless
