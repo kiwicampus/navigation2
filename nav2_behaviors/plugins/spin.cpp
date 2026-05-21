@@ -71,13 +71,22 @@ ResultStatus Spin::onRun(const std::shared_ptr<const SpinActionGoal> command)
   relative_yaw_ = 0.0;
 
   cmd_yaw_ = command->target_yaw;
-  RCLCPP_INFO(
-    logger_, "Turning %0.2f for spin behavior.",
-    cmd_yaw_);
-
   command_time_allowance_ = command->time_allowance;
   cmd_disable_collision_checks_ = command->disable_collision_checks;
   end_time_ = this->clock_->now() + command_time_allowance_;
+
+  // Check if current pose is collision-free before attempting to spin
+  if (!cmd_disable_collision_checks_) {
+    if (!local_collision_checker_->isCollisionFree(current_pose.pose, true)) {
+      std::string error_msg = "Robot is on a deadly pixel - cannot spin. Exiting immediately.";
+      RCLCPP_WARN(logger_, error_msg.c_str());
+      return ResultStatus{Status::FAILED, SpinActionResult::COLLISION_AHEAD, error_msg};
+    }
+  }
+
+  RCLCPP_INFO(
+    logger_, "Turning %0.2f for spin behavior.",
+    cmd_yaw_);
 
   return ResultStatus{Status::SUCCEEDED, SpinActionResult::NONE, ""};
 }
