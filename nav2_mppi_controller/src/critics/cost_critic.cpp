@@ -34,7 +34,7 @@ void CostCritic::initialize()
   getParam(near_goal_distance_, "near_goal_distance", 0.5f);
   getParam(inflation_layer_name_, "inflation_layer_name", std::string(""));
   getParam(trajectory_point_step_, "trajectory_point_step", 2);
-
+  getParam(legacy_near_collision_cost_check, "legacy_near_collision_cost_check", false);
   // Normalized by cost value to put in same regime as other weights
   weight_ /= 254.0f;
 
@@ -60,9 +60,9 @@ void CostCritic::initialize()
 
   if (costmap_ros_->getUseRadius() == consider_footprint_) {
     RCLCPP_WARN(
-      logger_,
-      "Inconsistent configuration in collision checking. Please verify the robot's shape settings "
-      "in both the costmap and the cost critic.");
+    logger_,
+    "Inconsistent configuration in collision checking. Please verify the robot's shape settings "
+    "in both the costmap and the cost critic.");
     if (costmap_ros_->getUseRadius()) {
       throw nav2_core::ControllerException(
               "Considering footprint in CostCritic but no robot footprint provided in the "
@@ -80,6 +80,9 @@ void CostCritic::initialize()
     "Critic will collision check based on %s cost.",
     power_, critical_cost_, weight_, consider_footprint_ ?
     "footprint" : "circular");
+  RCLCPP_INFO(logger_,
+    "Legacy mode (does not use footprint cost for near collision checking) is %s",
+    legacy_near_collision_cost_check ? "enabled" : "disabled");
 }
 
 float CostCritic::findCircumscribedCost(
@@ -158,6 +161,9 @@ void CostCritic::score(CriticData & data)
   repulsive_cost.setZero();
   bool all_trajectories_collide = true;
 
+  auto & collisions = data.trajectories_in_collision;
+  const bool track_collisions = !collisions.empty();
+
   int strided_traj_cols = floor((data.trajectories.x.cols() - 1) / trajectory_point_step_) + 1;
   int strided_traj_rows = data.trajectories.x.rows();
   int outer_stride = strided_traj_rows * trajectory_point_step_;
@@ -165,15 +171,15 @@ void CostCritic::score(CriticData & data)
   const auto traj_x = Eigen::Map<const Eigen::ArrayXXf, 0,
       Eigen::Stride<-1, -1>>(
     data.trajectories.x.data(), strided_traj_rows, strided_traj_cols,
-    Eigen::Stride<-1, -1>(outer_stride, 1));
+      Eigen::Stride<-1, -1>(outer_stride, 1));
   const auto traj_y = Eigen::Map<const Eigen::ArrayXXf, 0,
       Eigen::Stride<-1, -1>>(
     data.trajectories.y.data(), strided_traj_rows, strided_traj_cols,
-    Eigen::Stride<-1, -1>(outer_stride, 1));
+      Eigen::Stride<-1, -1>(outer_stride, 1));
   const auto traj_yaw = Eigen::Map<const Eigen::ArrayXXf, 0,
       Eigen::Stride<-1, -1>>(
     data.trajectories.yaws.data(), strided_traj_rows, strided_traj_cols,
-    Eigen::Stride<-1, -1>(outer_stride, 1));
+      Eigen::Stride<-1, -1>(outer_stride, 1));
 
   for (int i = 0; i < strided_traj_rows; ++i) {
     bool trajectory_collide = false;
@@ -200,16 +206,30 @@ void CostCritic::score(CriticData & data)
       if (inCollision(pose_cost, Tx, Ty, traj_yaw(i, j))) {
         traj_cost = collision_cost_;
         trajectory_collide = true;
+        if (track_collisions) {collisions[i] = true;}
         break;
       }
 
       // Let near-collision trajectory points be punished severely
-      // Note that we collision check based on the footprint actual,
-      // but score based on the center-point cost regardless
-      if (pose_cost >= static_cast<float>(near_collision_cost_)) {
-        traj_cost += critical_cost_;
-      } else if (!near_goal) {  // Generally prefer trajectories further from obstacles
-        traj_cost += pose_cost;
+      if (!legacy_near_collision_cost_check) {
+        // Use footprint-aware cost for threshold when consider_footprint_ is true
+        if (!near_goal) {
+          float pose_footprint_cost = getPoseCost(Tx, Ty, traj_yaw(i, j));
+          if (pose_footprint_cost >= static_cast<float>(near_collision_cost_)) {
+            traj_cost += critical_cost_;
+          } else {  // Generally prefer trajectories further from obstacles
+            traj_cost += pose_cost;  // Keep using center-point cost for progressive penalties
+          }
+        }
+      } else {
+        // Let near-collision trajectory points be punished severely
+        // Note that we collision check based on the footprint actual,
+        // but score based on the center-point cost regardless
+        if (pose_cost >= static_cast<float>(near_collision_cost_)) {
+          traj_cost += critical_cost_;
+        } else if (!near_goal) {  // Generally prefer trajectories further from obstacles
+          traj_cost += pose_cost;
+        }
       }
     }
 
