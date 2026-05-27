@@ -118,6 +118,21 @@ StaticLayer::activate()
     std::bind(
       &StaticLayer::validateParameterUpdatesCallback,
       this, std::placeholders::_1));
+
+  // Always enable the static layer on activation to ensure map is shown.
+  if (!enabled_) {
+    RCLCPP_INFO(logger_, "Enabling static layer on activation");
+    enabled_ = true;
+
+    auto param = rclcpp::Parameter(name_ + "." + "enabled", enabled_);
+    node->set_parameter(param);
+
+    x_ = y_ = 0;
+    width_ = size_x_;
+    height_ = size_y_;
+    has_updated_data_ = true;
+    setCurrent(false);
+  }
 }
 
 void
