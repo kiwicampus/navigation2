@@ -52,10 +52,13 @@ public:
   * @param topic publisher topic name
   * @param qos publisher quality of service
   */
+  // Iron compat: take the rclcpp_lifecycle base so this accepts both nav2_util::LifecycleNode
+  // (existing consumers) and nav2::LifecycleNode (nav2_ros_common, used by vendored opennav_docking).
+  // qos defaulted so the 2-arg call site in opennav_docking compiles unchanged.
   explicit TwistPublisher(
-    nav2_util::LifecycleNode::SharedPtr node,
+    rclcpp_lifecycle::LifecycleNode::SharedPtr node,
     const std::string & topic,
-    const rclcpp::QoS & qos)
+    const rclcpp::QoS & qos = rclcpp::SystemDefaultsQoS())
   : topic_(topic)
   {
     using nav2_util::declare_parameter_if_not_declared;

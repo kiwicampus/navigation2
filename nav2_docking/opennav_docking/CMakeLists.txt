@@ -8,11 +8,14 @@ find_package(rclcpp_action REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
+find_package(nav2_ros_common REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(nav2_graceful_controller REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(nav2_util REQUIRED)
+find_package(nav_2d_utils REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
@@ -41,10 +44,13 @@ set(dependencies
   rclcpp_lifecycle
   rclcpp_components
   std_msgs
+  std_srvs
+  nav2_ros_common
   sensor_msgs
   visualization_msgs
   nav2_graceful_controller
   nav2_util
+  nav_2d_utils
   nav2_msgs
   nav_msgs
   geometry_msgs
@@ -66,6 +72,7 @@ ament_target_dependencies(controller
 
 add_library(${library_name} SHARED
   src/docking_server.cpp
+  src/parameter_handler.cpp
   src/dock_database.cpp
   src/navigator.cpp
 )
@@ -123,7 +130,10 @@ install(DIRECTORY include/
   DESTINATION include/
 )
 
-install(FILES test/test_dock_file.yaml
+install(DIRECTORY test/dock_files/
+  DESTINATION share/${PROJECT_NAME}/dock_files/
+)
+install(FILES test/docking_params.yaml
   DESTINATION share/${PROJECT_NAME}/
 )
 

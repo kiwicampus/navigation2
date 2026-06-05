@@ -7,6 +7,7 @@ find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(nav2_util REQUIRED)
 find_package(nav2_msgs REQUIRED)
+find_package(nav2_ros_common REQUIRED)
 
 nav2_package()
 
@@ -15,6 +16,7 @@ set(dependencies
   rclcpp_lifecycle
   nav2_msgs
   nav2_util
+  nav2_ros_common
 )
 
 install(DIRECTORY include/

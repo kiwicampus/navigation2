@@ -10,6 +10,7 @@ find_package(rclcpp_components REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(nav2_behavior_tree REQUIRED)
 find_package(nav2_util REQUIRED)
+find_package(nav2_ros_common REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -47,6 +48,7 @@ set(dependencies
   rclcpp_components
   std_msgs
   nav2_util
+  nav2_ros_common
   nav2_behavior_tree
   nav2_msgs
   nav_msgs

@@ -1,0 +1,6 @@
+# navigation2 is a vendored git submodule kept in upstream (ros-navigation) style.
+# Disable editor format-on-save for the entire subtree so the IDE does not rewrite
+# vendored files to this repo's root clang-format style. The team's auto_format.sh
+# already excludes submodules; this mirrors that for IDE format-on-save.
+DisableFormat: true
+SortIncludes: false

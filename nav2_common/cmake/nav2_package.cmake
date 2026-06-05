@@ -60,3 +60,42 @@ macro(nav2_package)
     )
   endif()
 endmacro()
+
+# Iron compat: test helper functions backported from upstream nav2_common (91d7096).
+# Vendored nav2_ros_common and opennav_docking test CMakeLists use nav2_add_gtest /
+# nav2_add_pytest_test, which did not exist in this Iron-era nav2_common. The
+# ros_isolated variants only exist in Kilted+, so on Iron these dispatch to the
+# standard ament_add_* macros (USE_ISOLATED_TESTS defaults OFF).
+option(USE_ISOLATED_TESTS "Enable ros_isolated_test" OFF)
+
+function(nav2_add_test target)
+  if(COMMAND ament_add_ros_isolated_test AND USE_ISOLATED_TESTS)
+    ament_add_ros_isolated_test(${target} ${ARGN})
+  else()
+    ament_add_test(${target} ${ARGN})
+  endif()
+endfunction()
+
+function(nav2_add_gtest target)
+  if(COMMAND ament_add_ros_isolated_gtest AND USE_ISOLATED_TESTS)
+    ament_add_ros_isolated_gtest(${target} ${ARGN})
+  else()
+    ament_add_gtest(${target} ${ARGN})
+  endif()
+endfunction()
+
+function(nav2_add_pytest_test target)
+  if(COMMAND ament_add_ros_isolated_pytest_test AND USE_ISOLATED_TESTS)
+    ament_add_ros_isolated_pytest_test(${target} ${ARGN})
+  else()
+    ament_add_pytest_test(${target} ${ARGN})
+  endif()
+endfunction()
+
+function(nav2_add_gmock target)
+  if(COMMAND ament_add_ros_isolated_gmock AND USE_ISOLATED_TESTS)
+    ament_add_ros_isolated_gmock(${target} ${ARGN})
+  else()
+    ament_add_gmock(${target} ${ARGN})
+  endif()
+endfunction()

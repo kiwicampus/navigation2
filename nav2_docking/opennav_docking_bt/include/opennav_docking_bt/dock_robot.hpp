@@ -28,6 +28,11 @@ namespace opennav_docking_bt
 
 /**
  * @brief nav2_behavior_tree::BtActionNode class that wraps opnav2_msgsennav_docking_msgs/DockRobot
+ *
+ * Usage in XML:
+ * @code
+ * <DockRobot dock_id="{dock_id}" error_code_id="{dock_error_code}" error_msg="{dock_error_msg}"/>
+ * @endcode
  */
 class DockRobotAction
   : public nav2_behavior_tree::BtActionNode<
@@ -69,6 +74,12 @@ public:
   BT::NodeStatus on_cancelled() override;
 
   /**
+   * @brief Function to perform work in a BT Node when the action server times out
+   * Such as setting the error code ID status to timed out for action clients.
+   */
+  void on_timeout() override;
+
+  /**
    * \brief Override required by the a BT action. Cancel the action and set the path output
    */
   void halt() override;
@@ -97,6 +108,8 @@ public:
           "success", "If the action was successful"),
         BT::OutputPort<ActionResult::_error_code_type>(
           "error_code_id", "Error code"),
+        BT::OutputPort<std::string>(
+          "error_msg", "Error message"),
         BT::OutputPort<ActionResult::_num_retries_type>(
           "num_retries", "The number of retries executed"),
       });
