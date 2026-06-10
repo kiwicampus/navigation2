@@ -81,7 +81,7 @@ protected:
   bool isCollisionFree(
     const double & distance,
     const geometry_msgs::msg::Twist & cmd_vel,
-    geometry_msgs::msg::Pose & pose);
+    geometry_msgs::msg::Pose2D & pose2d);
 
   SpinAction::Feedback::SharedPtr feedback_;
 

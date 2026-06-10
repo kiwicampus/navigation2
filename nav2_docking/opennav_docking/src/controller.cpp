@@ -28,7 +28,7 @@ namespace opennav_docking
 {
 
 Controller::Controller(
-  const nav2::LifecycleNode::SharedPtr & node, std::shared_ptr<tf2_ros::Buffer> tf,
+  const rclcpp_lifecycle::LifecycleNode::SharedPtr & node, std::shared_ptr<tf2_ros::Buffer> tf,
   std::string fixed_frame, std::string base_frame)
 : tf2_buffer_(tf), fixed_frame_(fixed_frame), base_frame_(base_frame)
 {
@@ -36,31 +36,31 @@ Controller::Controller(
   clock_ = node->get_clock();
 
   std::string costmap_topic, footprint_topic;
-  k_phi_ = node->declare_or_get_parameter("controller.k_phi", 3.0);
-  k_delta_ = node->declare_or_get_parameter("controller.k_delta", 2.0);
-  beta_ = node->declare_or_get_parameter("controller.beta", 0.4);
-  lambda_ = node->declare_or_get_parameter("controller.lambda", 2.0);
-  v_linear_min_ = node->declare_or_get_parameter("controller.v_linear_min", 0.1);
-  v_linear_max_ = node->declare_or_get_parameter("controller.v_linear_max", 0.25);
-  v_angular_max_ = node->declare_or_get_parameter("controller.v_angular_max", 0.75);
-  slowdown_radius_ = node->declare_or_get_parameter("controller.slowdown_radius", 0.25);
-  rotate_to_heading_angular_vel_ = node->declare_or_get_parameter(
+  k_phi_ = nav2::declare_or_get_parameter(node, "controller.k_phi", 3.0);
+  k_delta_ = nav2::declare_or_get_parameter(node, "controller.k_delta", 2.0);
+  beta_ = nav2::declare_or_get_parameter(node, "controller.beta", 0.4);
+  lambda_ = nav2::declare_or_get_parameter(node, "controller.lambda", 2.0);
+  v_linear_min_ = nav2::declare_or_get_parameter(node, "controller.v_linear_min", 0.1);
+  v_linear_max_ = nav2::declare_or_get_parameter(node, "controller.v_linear_max", 0.25);
+  v_angular_max_ = nav2::declare_or_get_parameter(node, "controller.v_angular_max", 0.75);
+  slowdown_radius_ = nav2::declare_or_get_parameter(node, "controller.slowdown_radius", 0.25);
+  rotate_to_heading_angular_vel_ = nav2::declare_or_get_parameter(node, 
     "controller.rotate_to_heading_angular_vel", 1.0);
-  rotate_to_heading_max_angular_accel_ = node->declare_or_get_parameter(
+  rotate_to_heading_max_angular_accel_ = nav2::declare_or_get_parameter(node, 
     "controller.rotate_to_heading_max_angular_accel", 3.2);
-  use_collision_detection_ = node->declare_or_get_parameter(
+  use_collision_detection_ = nav2::declare_or_get_parameter(node, 
     "controller.use_collision_detection", true);
-  costmap_topic = node->declare_or_get_parameter("controller.costmap_topic",
+  costmap_topic = nav2::declare_or_get_parameter(node, "controller.costmap_topic",
     std::string("local_costmap/costmap_raw"));
-  footprint_topic = node->declare_or_get_parameter("controller.footprint_topic",
+  footprint_topic = nav2::declare_or_get_parameter(node, "controller.footprint_topic",
     std::string("local_costmap/published_footprint"));
-  transform_tolerance_ = node->declare_or_get_parameter(
+  transform_tolerance_ = nav2::declare_or_get_parameter(node, 
     "controller.transform_tolerance", 0.1);
-  projection_time_ = node->declare_or_get_parameter(
+  projection_time_ = nav2::declare_or_get_parameter(node, 
     "controller.projection_time", 5.0);
-  simulation_time_step_ = node->declare_or_get_parameter(
+  simulation_time_step_ = nav2::declare_or_get_parameter(node, 
     "controller.simulation_time_step", 0.1);
-  dock_collision_threshold_ = node->declare_or_get_parameter(
+  dock_collision_threshold_ = nav2::declare_or_get_parameter(node, 
     "controller.dock_collision_threshold", 0.3);
 
   control_law_ = std::make_unique<nav2_graceful_controller::SmoothControlLaw>(
@@ -82,7 +82,7 @@ Controller::Controller(
   }
 
   trajectory_pub_ =
-    node->create_publisher<nav_msgs::msg::Path>("docking_trajectory");
+    node->create_publisher<nav_msgs::msg::Path>("docking_trajectory", 1);
 }
 
 Controller::~Controller()
@@ -202,7 +202,7 @@ bool Controller::isTrajectoryCollisionFree(
 }
 
 void Controller::configureCollisionChecker(
-  const nav2::LifecycleNode::SharedPtr & node,
+  const rclcpp_lifecycle::LifecycleNode::SharedPtr & node,
   std::string costmap_topic, std::string footprint_topic, double transform_tolerance)
 {
   costmap_sub_ = std::make_unique<nav2_costmap_2d::CostmapSubscriber>(node, costmap_topic);

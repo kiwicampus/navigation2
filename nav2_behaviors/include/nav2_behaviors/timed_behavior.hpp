@@ -31,7 +31,7 @@
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav2_util/robot_utils.hpp"
 #include "nav2_util/twist_publisher.hpp"
-#include "nav2_ros_common/simple_action_server.hpp"
+#include "nav2_util/simple_action_server.hpp"
 #include "nav2_core/behavior.hpp"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
@@ -53,7 +53,6 @@ struct ResultStatus
 {
   Status status;
   uint16_t error_code{0};
-  std::string error_msg;
 };
 
 using namespace std::chrono_literals;  //NOLINT
@@ -66,7 +65,7 @@ template<typename ActionT>
 class TimedBehavior : public nav2_core::Behavior
 {
 public:
-  using ActionServer = nav2::SimpleActionServer<ActionT>;
+  using ActionServer = nav2_util::SimpleActionServer<ActionT>;
 
   /**
    * @brief A TimedBehavior constructor
@@ -113,7 +112,7 @@ public:
 
   // configure the server on lifecycle setup
   void configure(
-    const nav2::LifecycleNode::WeakPtr & parent,
+    const rclcpp_lifecycle::LifecycleNode::WeakPtr & parent,
     const std::string & name, std::shared_ptr<tf2_ros::Buffer> tf,
     std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker> local_collision_checker,
     std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker> global_collision_checker)
@@ -135,15 +134,24 @@ public:
     node->get_parameter("robot_base_frame", robot_base_frame_);
     node->get_parameter("transform_tolerance", transform_tolerance_);
 
-    action_server_ = node->create_action_server<ActionT>(
-      behavior_name_,
+    if (!node->has_parameter("action_server_result_timeout")) {
+      node->declare_parameter("action_server_result_timeout", 10.0);
+    }
+
+    double action_server_result_timeout;
+    node->get_parameter("action_server_result_timeout", action_server_result_timeout);
+    rcl_action_server_options_t server_options = rcl_action_server_get_default_options();
+    server_options.result_timeout.nanoseconds = RCL_S_TO_NS(action_server_result_timeout);
+
+    action_server_ = std::make_shared<ActionServer>(
+      node, behavior_name_,
       std::bind(&TimedBehavior::execute, this), nullptr, std::chrono::milliseconds(
-        500), false);
+        500), false, server_options);
 
     local_collision_checker_ = local_collision_checker;
     global_collision_checker_ = global_collision_checker;
 
-    vel_pub_ = std::make_unique<nav2_util::TwistPublisher>(node, "cmd_vel");
+    vel_pub_ = std::make_unique<nav2_util::TwistPublisher>(node, "cmd_vel", 1);
 
     onConfigure();
   }
@@ -175,11 +183,11 @@ public:
   }
 
 protected:
-  nav2::LifecycleNode::WeakPtr node_;
+  rclcpp_lifecycle::LifecycleNode::WeakPtr node_;
 
   std::string behavior_name_;
   std::unique_ptr<nav2_util::TwistPublisher> vel_pub_;
-  typename ActionServer::SharedPtr action_server_;
+  std::shared_ptr<ActionServer> action_server_;
   std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker> local_collision_checker_;
   std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker> global_collision_checker_;
   std::shared_ptr<tf2_ros::Buffer> tf_;
@@ -216,11 +224,10 @@ protected:
 
     ResultStatus on_run_result = onRun(action_server_->get_current_goal());
     if (on_run_result.status != Status::SUCCEEDED) {
-      result->error_code = on_run_result.error_code;
-      result->error_msg = on_run_result.error_msg;
       RCLCPP_INFO(
-        logger_, "Initial checks failed for %s - %s", behavior_name_.c_str(),
-        on_run_result.error_msg.c_str());
+        logger_,
+        "Initial checks failed for %s", behavior_name_.c_str());
+      result->error_code = on_run_result.error_code;
       action_server_->terminate_current(result);
       return;
     }
@@ -264,10 +271,9 @@ protected:
           return;
 
         case Status::FAILED:
-          result->error_code = on_cycle_update_result.error_code;
-          result->error_msg = behavior_name_ + " failed:" + on_cycle_update_result.error_msg;
-          RCLCPP_WARN(logger_, result->error_msg.c_str());
+          RCLCPP_WARN(logger_, "%s failed", behavior_name_.c_str());
           result->total_elapsed_time = clock_->now() - start_time;
+          result->error_code = on_cycle_update_result.error_code;
           onActionCompletion(result);
           action_server_->terminate_current(result);
           return;
