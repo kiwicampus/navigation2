@@ -2,7 +2,11 @@ cmake_minimum_required(VERSION 3.8)
 project(nav2_ros_common)
 
 find_package(ament_cmake REQUIRED)
-find_package(backward_ros REQUIRED)
+# Iron CI compat: backward_ros only registers a global crash-backtrace handler in
+# executables. nav2_ros_common is an INTERFACE (header-only) library and never
+# links or exports it, so it is functionally unused here. Make it optional so the
+# build does not fail on base images that don't ship ros-${ROS_DISTRO}-backward-ros.
+find_package(backward_ros QUIET)
 find_package(bond REQUIRED)
 find_package(bondcpp REQUIRED)
 # Iron compat: ensure bondcpp::bondcpp target exists (see cmake/bondcpp_shim.cmake)
