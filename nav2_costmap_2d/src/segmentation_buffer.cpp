@@ -81,6 +81,7 @@ SegmentationBuffer::SegmentationBuffer(const nav2_util::LifecycleNode::WeakPtr& 
   logger_ = node->get_logger();
   last_updated_ = node->now();
   temporal_tile_map_ = std::make_shared<SegmentationTileMap>(costmap_resolution, tile_map_decay_time);
+  segmentation_cost_multimap_ = std::make_shared<SegmentationCostMultimap>();
   visualize_tile_map_ = visualize_tile_map;
   use_cost_selection_ = use_cost_selection;
   RCLCPP_INFO(logger_, "SegmentationBuffer [%s]: Selection method = %s", 

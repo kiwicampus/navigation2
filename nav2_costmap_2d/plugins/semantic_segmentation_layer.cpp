@@ -84,6 +84,7 @@ void SemanticSegmentationLayer::onInitialize()
   node->get_parameter("track_unknown_space", track_unknown_space);
   node->get_parameter("transform_tolerance", transform_tolerance);  
 
+  clock_ = node->get_clock();
   global_frame_ = layered_costmap_->getGlobalFrameID();
   rolling_window_ = layered_costmap_->isRolling();
 
@@ -455,7 +456,7 @@ void SemanticSegmentationLayer::syncSegmPointcloudCb(
   }
   if (buffer->isClassIdCostMapEmpty())
   {
-    RCLCPP_WARN(logger_, "Class map is empty because a labelinfo message has not been received for topic %s. Will not buffer message", buffer->getBufferSource().c_str());
+    RCLCPP_WARN_THROTTLE(logger_, *clock_, 5000, "Class map is empty because a labelinfo message has not been received for topic %s. Will not buffer message", buffer->getBufferSource().c_str());
     return;
   }
   // if no confidence available, create a mask with all elements having max confidence
@@ -493,7 +494,7 @@ void SemanticSegmentationLayer::syncSegmConfPointcloudCb(const std::shared_ptr<c
     }
     if (buffer->isClassIdCostMapEmpty())
     {
-      RCLCPP_WARN(logger_, "Class map is empty because a labelinfo message has not been received for topic %s. Will not buffer message", buffer->getBufferSource().c_str());
+      RCLCPP_WARN_THROTTLE(logger_, *clock_, 5000, "Class map is empty because a labelinfo message has not been received for topic %s. Will not buffer message", buffer->getBufferSource().c_str());
       return;
     }
     buffer->lock();
