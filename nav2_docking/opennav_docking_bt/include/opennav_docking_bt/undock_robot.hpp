@@ -28,6 +28,11 @@ namespace opennav_docking_bt
 
 /**
  * @brief nav2_behavior_tree::BtActionNode class that wraps nav2_msgs/UndockRobot
+ *
+ * Usage in XML:
+ * @code
+ * <UndockRobot dock_type="{dock_type}" error_code_id={undock_error_code} error_msg={undock_error_msg}/>
+ * @endcode
  */
 class UndockRobotAction
   : public nav2_behavior_tree::BtActionNode<
@@ -69,6 +74,12 @@ public:
   BT::NodeStatus on_cancelled() override;
 
   /**
+   * @brief Function to perform work in a BT Node when the action server times out
+   * Such as setting the error code ID status to timed out for action clients.
+   */
+  void on_timeout() override;
+
+  /**
    * \brief Override required by the a BT action. Cancel the action and set the path output
    */
   void halt() override;
@@ -90,6 +101,8 @@ public:
           "success", "If the action was successful"),
         BT::OutputPort<ActionResult::_error_code_type>(
           "error_code_id", "Error code"),
+        BT::OutputPort<std::string>(
+          "error_msg", "Error message"),
       });
   }
 };

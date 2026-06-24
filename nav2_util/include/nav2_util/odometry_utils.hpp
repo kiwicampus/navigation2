@@ -59,8 +59,11 @@ public:
    * @param filter_duration Duration for odom history (seconds)
    * @param odom_topic Topic on which odometry should be received
    */
+  // Iron compat: take the rclcpp_lifecycle base so this overload accepts both
+  // nav2_util::LifecycleNode (existing consumers) and nav2::LifecycleNode (nav2_ros_common,
+  // used by vendored opennav_docking).
   explicit OdomSmoother(
-    const nav2_util::LifecycleNode::WeakPtr & parent,
+    const rclcpp_lifecycle::LifecycleNode::WeakPtr & parent,
     double filter_duration = 0.3,
     const std::string & odom_topic = "odom");
 

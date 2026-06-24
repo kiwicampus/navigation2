@@ -9,6 +9,7 @@ find_package(nav2_util REQUIRED)
 find_package(nav2_msgs REQUIRED)
 find_package(nav2_core REQUIRED)
 find_package(nav2_behavior_tree REQUIRED)
+find_package(nav2_ros_common REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(behaviortree_cpp REQUIRED)
@@ -29,6 +30,7 @@ set(dependencies
   nav2_msgs
   nav2_core
   nav2_behavior_tree
+  nav2_ros_common
   nav_msgs
   geometry_msgs
   behaviortree_cpp

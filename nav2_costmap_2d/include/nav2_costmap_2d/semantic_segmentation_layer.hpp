@@ -183,6 +183,7 @@ class SemanticSegmentationLayer : public CostmapLayer
     bool was_reset_;
     bool use_approximate_time_sync_;
     int combination_method_;
+    rclcpp::Clock::SharedPtr clock_;
 };
 
 }  // namespace nav2_costmap_2d

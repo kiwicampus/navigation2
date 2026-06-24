@@ -44,7 +44,7 @@ OdomSmoother::OdomSmoother(
 }
 
 OdomSmoother::OdomSmoother(
-  const nav2_util::LifecycleNode::WeakPtr & parent,
+  const rclcpp_lifecycle::LifecycleNode::WeakPtr & parent,
   double filter_duration,
   const std::string & odom_topic)
 : odom_history_duration_(rclcpp::Duration::from_seconds(filter_duration))
