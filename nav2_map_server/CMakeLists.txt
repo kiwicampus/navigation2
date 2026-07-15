@@ -118,7 +118,9 @@ target_include_directories(${map_io_library_name} SYSTEM PRIVATE
   ${GRAPHICSMAGICKCPP_INCLUDE_DIRS})
 
 target_link_libraries(${map_io_library_name}
-  ${GRAPHICSMAGICKCPP_LIBRARIES})
+  ${GRAPHICSMAGICKCPP_LIBRARIES}
+  yaml-cpp
+)
 
 if(WIN32)
   target_compile_definitions(${map_io_library_name} PRIVATE
