@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include "angles/angles.h"
+#include "nav2_ros_common/rate.hpp"
 #include "opennav_docking_core/docking_exceptions.hpp"
 #include "opennav_following/following_server.hpp"
 #include "nav2_util/geometry_utils.hpp"
@@ -44,7 +45,7 @@ FollowingServer::on_configure(const rclcpp_lifecycle::State & /*state*/)
   params_ = param_handler_->getParams();
 
   vel_publisher_ = std::make_unique<nav2_util::TwistPublisher>(node, "cmd_vel");
-  tf2_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  tf2_buffer_ = nav2::create_transform_buffer(node);
 
   // Create odom subscriber for backward blind docking
   odom_sub_ = std::make_unique<nav2_util::OdomSmoother>(node, params_->odom_duration,
@@ -92,7 +93,7 @@ FollowingServer::on_activate(const rclcpp_lifecycle::State & /*state*/)
 {
   RCLCPP_INFO(get_logger(), "Activating %s", get_name());
 
-  tf2_listener_ = std::make_unique<tf2_ros::TransformListener>(*tf2_buffer_, this, true);
+  tf2_listener_ = nav2::create_transform_listener(*tf2_buffer_, this, true);
   vel_publisher_->on_activate();
   filtered_dynamic_pose_pub_->on_activate();
   following_action_server_->activate();
@@ -180,7 +181,7 @@ void FollowingServer::followObject()
 {
   std::lock_guard<std::mutex> lock_reinit(param_handler_->getMutex());
   action_start_time_ = this->now();
-  rclcpp::Rate loop_rate(params_->controller_frequency);
+  nav2::Rate loop_rate(this, params_->controller_frequency);
 
   auto goal = following_action_server_->get_current_goal();
   auto result = std::make_shared<FollowObject::Result>();
@@ -308,23 +309,23 @@ void FollowingServer::followObject()
     }
   } catch (const tf2::TransformException & e) {
     result->error_msg = std::string("Transform error: ") + e.what();
-    RCLCPP_ERROR(get_logger(), result->error_msg.c_str());
+    RCLCPP_ERROR(get_logger(), "%s", result->error_msg.c_str());
     result->error_code = FollowObject::Result::TF_ERROR;
   } catch (opennav_docking_core::FailedToDetectDock & e) {
     result->error_msg = e.what();
-    RCLCPP_ERROR(get_logger(), result->error_msg.c_str());
+    RCLCPP_ERROR(get_logger(), "%s", result->error_msg.c_str());
     result->error_code = FollowObject::Result::FAILED_TO_DETECT_OBJECT;
   } catch (opennav_docking_core::FailedToControl & e) {
     result->error_msg = e.what();
-    RCLCPP_ERROR(get_logger(), result->error_msg.c_str());
+    RCLCPP_ERROR(get_logger(), "%s", result->error_msg.c_str());
     result->error_code = FollowObject::Result::FAILED_TO_CONTROL;
   } catch (opennav_docking_core::DockingException & e) {
     result->error_msg = e.what();
-    RCLCPP_ERROR(get_logger(), result->error_msg.c_str());
+    RCLCPP_ERROR(get_logger(), "%s", result->error_msg.c_str());
     result->error_code = FollowObject::Result::UNKNOWN;
   } catch (std::exception & e) {
     result->error_msg = e.what();
-    RCLCPP_ERROR(get_logger(), result->error_msg.c_str());
+    RCLCPP_ERROR(get_logger(), "%s", result->error_msg.c_str());
     result->error_code = FollowObject::Result::UNKNOWN;
   }
 
@@ -522,19 +523,19 @@ bool FollowingServer::getRefinedPose(geometry_msgs::msg::PoseStamped & pose)
   geometry_msgs::msg::PoseStamped detected = detected_dynamic_pose_;
 
   // If we haven't received any detection yet, wait up to detection_timeout_ for one to arrive.
-  if (detected.header.stamp == rclcpp::Time(0)) {
+  if (detected.header.stamp == builtin_interfaces::msg::Time{}) {
     auto start = this->now();
     auto timeout = rclcpp::Duration::from_seconds(params_->detection_timeout);
-    rclcpp::Rate wait_rate(params_->controller_frequency);
+    nav2::Rate wait_rate(this, params_->controller_frequency);
     while (this->now() - start < timeout) {
       // Check if a new detection arrived
-      if (detected_dynamic_pose_.header.stamp != rclcpp::Time(0)) {
+      if (detected_dynamic_pose_.header.stamp != builtin_interfaces::msg::Time{}) {
         detected = detected_dynamic_pose_;
         break;
       }
       wait_rate.sleep();
     }
-    if (detected.header.stamp == rclcpp::Time(0)) {
+    if (detected.header.stamp == builtin_interfaces::msg::Time{}) {
       RCLCPP_WARN(this->get_logger(), "No detection received within timeout period");
       return false;
     }

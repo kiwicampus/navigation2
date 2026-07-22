@@ -29,6 +29,7 @@
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "nav2_controller/plugins/feasible_path_handler.hpp"
 #include "nav2_controller/plugins/simple_goal_checker.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 
 class BasicAPIRPP : public nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
 {
@@ -60,9 +61,14 @@ public:
     return shouldRotateToPath(carrot_pose, angle_to_path, x_vel_sign);
   }
 
-  bool shouldRotateToGoalHeadingWrapper(const geometry_msgs::msg::PoseStamped & carrot_pose)
+  bool shouldRotateToGoalHeadingWrapper(
+    nav2_core::GoalChecker * goal_checker,
+    const geometry_msgs::msg::PoseStamped & robot_pose,
+    const geometry_msgs::msg::PoseStamped & goal_pose,
+    const geometry_msgs::msg::Twist & speed,
+    const nav_msgs::msg::Path & transformed_plan)
   {
-    return shouldRotateToGoalHeading(carrot_pose);
+    return shouldRotateToGoalHeading(goal_checker, robot_pose, goal_pose, speed, transformed_plan);
   }
 
   void rotateToHeadingWrapper(
@@ -95,7 +101,7 @@ TEST(RegulatedPurePursuitTest, basicAPI)
 {
   auto node = std::make_shared<nav2::LifecycleNode>("testRPP");
   std::string name = "PathFollower";
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap");
 
   // instantiate
@@ -140,7 +146,7 @@ TEST(RegulatedPurePursuitTest, lookaheadAPI)
   auto ctrl = std::make_shared<BasicAPIRPP>();
   auto node = std::make_shared<nav2::LifecycleNode>("testRPP");
   std::string name = "PathFollower";
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap");
   rclcpp_lifecycle::State state;
   costmap->on_configure(state);
@@ -175,20 +181,39 @@ TEST(RegulatedPurePursuitTest, lookaheadAPI)
 
 TEST(RegulatedPurePursuitTest, rotateTests)
 {
+  auto make_orientation = [](double yaw) {
+      geometry_msgs::msg::Quaternion q;
+      q.z = sin(yaw * 0.5);
+      q.w = cos(yaw * 0.5);
+      return q;
+    };
+  auto make_transformed_plan = [&](double goal_x, double goal_y, double goal_yaw) {
+      nav_msgs::msg::Path plan;
+      geometry_msgs::msg::PoseStamped goal_pose;
+      goal_pose.pose.position.x = goal_x;
+      goal_pose.pose.position.y = goal_y;
+      goal_pose.pose.orientation = make_orientation(goal_yaw);
+      plan.poses.push_back(goal_pose);
+      return plan;
+    };
+
   // --------------------------
   // Non-Stateful Configuration
   // --------------------------
   auto ctrl = std::make_shared<BasicAPIRPP>();
   auto node = std::make_shared<nav2::LifecycleNode>("testRPP");
-  nav2::declare_parameter_if_not_declared(
-    node, "PathFollower.stateful", rclcpp::ParameterValue(false));
 
   std::string name = "PathFollower";
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap");
   rclcpp_lifecycle::State state;
   costmap->on_configure(state);
   ctrl->configure(node, name, tf, costmap);
+
+  nav2_controller::SimpleGoalChecker goal_checker;
+  nav2::declare_parameter_if_not_declared(
+    node, "checker.stateful", rclcpp::ParameterValue(false));
+  goal_checker.initialize(node, "checker", costmap);
 
   // shouldRotateToPath
   geometry_msgs::msg::PoseStamped carrot;
@@ -204,17 +229,22 @@ TEST(RegulatedPurePursuitTest, rotateTests)
   EXPECT_EQ(ctrl->shouldRotateToPathWrapper(carrot, angle_to_path_rtn), true);
 
   // shouldRotateToGoalHeading
-  carrot.pose.position.x = 0.0;
-  carrot.pose.position.y = 0.0;
-  EXPECT_EQ(ctrl->shouldRotateToGoalHeadingWrapper(carrot), true);
+  geometry_msgs::msg::PoseStamped robot_pose;
+  geometry_msgs::msg::Twist robot_speed;
+  const double goal_yaw = 1.0;  // > rotate_to_heading_min_angle default (0.785)
 
-  carrot.pose.position.x = 0.0;
-  carrot.pose.position.y = 0.24;
-  EXPECT_EQ(ctrl->shouldRotateToGoalHeadingWrapper(carrot), true);
+  auto plan_in_tolerance = make_transformed_plan(0.0, 0.24, goal_yaw);
+  EXPECT_EQ(
+    ctrl->shouldRotateToGoalHeadingWrapper(
+      &goal_checker, robot_pose, plan_in_tolerance.poses.back(), robot_speed, plan_in_tolerance),
+    true);
 
-  carrot.pose.position.x = 0.0;
-  carrot.pose.position.y = 0.26;
-  EXPECT_EQ(ctrl->shouldRotateToGoalHeadingWrapper(carrot), false);
+  auto plan_outside_tolerance = make_transformed_plan(0.0, 0.26, goal_yaw);
+  EXPECT_EQ(
+    ctrl->shouldRotateToGoalHeadingWrapper(
+      &goal_checker, robot_pose, plan_outside_tolerance.poses.back(), robot_speed,
+      plan_outside_tolerance),
+    false);
 
   // rotateToHeading
   double lin_v = 10.0;
@@ -253,22 +283,37 @@ TEST(RegulatedPurePursuitTest, rotateTests)
   // Stateful Configuration
   // -----------------------
   node->set_parameter(
-    rclcpp::Parameter("PathFollower.stateful", true));
+    rclcpp::Parameter("checker.stateful", true));
 
   ctrl->configure(node, name, tf, costmap);
 
+  nav2_controller::SimpleGoalChecker stateful_goal_checker;
+  node->set_parameter(rclcpp::Parameter("checker.stateful", true));
+  stateful_goal_checker.initialize(node, "checker", costmap);
+  stateful_goal_checker.reset();
+
   // Start just outside tolerance
-  carrot.pose.position.x = 0.0;
-  carrot.pose.position.y = 0.26;
-  EXPECT_EQ(ctrl->shouldRotateToGoalHeadingWrapper(carrot), false);
+  auto stateful_plan_outside = make_transformed_plan(0.0, 0.26, goal_yaw);
+  EXPECT_EQ(
+    ctrl->shouldRotateToGoalHeadingWrapper(
+      &stateful_goal_checker, robot_pose, stateful_plan_outside.poses.back(), robot_speed,
+      stateful_plan_outside),
+    false);
 
   // Enter tolerance (should set internal flag)
-  carrot.pose.position.y = 0.24;
-  EXPECT_EQ(ctrl->shouldRotateToGoalHeadingWrapper(carrot), true);
+  auto stateful_plan_inside = make_transformed_plan(0.0, 0.24, goal_yaw);
+  EXPECT_EQ(
+    ctrl->shouldRotateToGoalHeadingWrapper(
+      &stateful_goal_checker, robot_pose, stateful_plan_inside.poses.back(), robot_speed,
+      stateful_plan_inside),
+    true);
 
-  // Move outside tolerance again - still expect true (due to persistent state)
-  carrot.pose.position.y = 0.26;
-  EXPECT_EQ(ctrl->shouldRotateToGoalHeadingWrapper(carrot), true);
+  // Move outside tolerance again - still expect true (due to persistent state in goal checker)
+  EXPECT_EQ(
+    ctrl->shouldRotateToGoalHeadingWrapper(
+      &stateful_goal_checker, robot_pose, stateful_plan_outside.poses.back(), robot_speed,
+      stateful_plan_outside),
+    true);
 }
 
 TEST(RegulatedPurePursuitTest, applyConstraints)
@@ -276,7 +321,7 @@ TEST(RegulatedPurePursuitTest, applyConstraints)
   auto ctrl = std::make_shared<BasicAPIRPP>();
   auto node = std::make_shared<nav2::LifecycleNode>("testRPP");
   std::string name = "PathFollower";
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap");
   rclcpp_lifecycle::State state;
   costmap->on_configure(state);
@@ -379,7 +424,7 @@ TEST(RegulatedPurePursuitTest, testDynamicParameter)
   costmap->on_configure(rclcpp_lifecycle::State());
   auto ctrl =
     std::make_unique<nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController>();
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   ctrl->configure(node, "test", tf, costmap);
   ctrl->activate();
 
@@ -417,7 +462,6 @@ TEST(RegulatedPurePursuitTest, testDynamicParameter)
       rclcpp::Parameter("test.inflation_cost_scaling_factor", 1.0),
       rclcpp::Parameter("test.allow_reversing", false),
       rclcpp::Parameter("test.use_rotate_to_heading", false),
-      rclcpp::Parameter("test.stateful", false),
       rclcpp::Parameter("test.use_dynamic_window", true),
       rclcpp::Parameter("test.allow_obstacle_checking_beyond_goal", false)});
 
@@ -457,7 +501,6 @@ TEST(RegulatedPurePursuitTest, testDynamicParameter)
       "test.use_cost_regulated_linear_velocity_scaling").as_bool(), false);
   EXPECT_EQ(node->get_parameter("test.allow_reversing").as_bool(), false);
   EXPECT_EQ(node->get_parameter("test.use_rotate_to_heading").as_bool(), false);
-  EXPECT_EQ(node->get_parameter("test.stateful").as_bool(), false);
   EXPECT_EQ(node->get_parameter("test.use_dynamic_window").as_bool(), true);
   EXPECT_EQ(node->get_parameter("test.allow_obstacle_checking_beyond_goal").as_bool(), false);
 
@@ -491,7 +534,7 @@ TEST(RegulatedPurePursuitTest, computeVelocityByDWPP)
   auto ctrl = std::make_shared<BasicAPIRPP>();
   auto node = std::make_shared<nav2::LifecycleNode>("testRPP");
   std::string name = "PathFollower";
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap");
   rclcpp_lifecycle::State state;
   costmap->on_configure(state);
@@ -559,7 +602,7 @@ TEST(RegulatedPurePursuitTest, testObstacleBeyondGoal)
   auto ctrl = std::make_shared<BasicAPIRPP>();
   auto node = std::make_shared<nav2::LifecycleNode>("testRPP");
   std::string name = "PathFollower";
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap");
   rclcpp_lifecycle::State state;
   costmap->on_configure(state);
@@ -644,7 +687,7 @@ TEST(RegulatedPurePursuitTest, testParameterWarnings)
   auto ctrl = std::make_shared<BasicAPIRPP>();
   auto node = std::make_shared<nav2::LifecycleNode>("testRPP");
   std::string name = "PathFollower";
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap = std::make_shared<nav2_costmap_2d::Costmap2DROS>("fake_costmap");
   rclcpp_lifecycle::State state;
   costmap->on_configure(state);

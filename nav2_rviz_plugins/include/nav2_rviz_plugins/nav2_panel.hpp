@@ -37,9 +37,7 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 #include "nav2_util/geometry_utils.hpp"
-#include "tf2_ros/transform_listener.hpp"
-#include "tf2_ros/create_timer_ros.hpp"
-#include "tf2_ros/buffer.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 
 class QPushButton;
 
@@ -130,7 +128,7 @@ private:
     rclcpp_action::ClientGoalHandle<nav2_msgs::action::NavigateThroughPoses>;
 
   // The (non-spinning) client node used to invoke the action client
-  rclcpp::Node::SharedPtr client_node_;
+  rclcpp::Node::SharedPtr client_node_;  //  nosemgrep
   rclcpp::executors::SingleThreadedExecutor::SharedPtr executor_;
   // Timeout value when waiting for action servers to respond
   std::chrono::milliseconds server_timeout_;
@@ -156,8 +154,8 @@ private:
     nav_through_poses_goal_status_sub_;
 
   // Tf's for initial pose
-  std::shared_ptr<tf2_ros::Buffer> tf2_buffer_;
-  std::shared_ptr<tf2_ros::TransformListener> transform_listener_;
+  nav2::TransformBuffer::SharedPtr tf2_buffer_;
+  nav2::TransformListener::SharedPtr transform_listener_;
 
   // Goal-related state
   nav2_msgs::action::NavigateToPose::Goal navigation_goal_;
@@ -261,6 +259,7 @@ private:
   static inline std::string toString(double val, int precision = 0);
 
   // Waypoint navigation visual markers publisher
+  //  nosemgrep
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr wp_navigation_markers_pub_;
 };
 

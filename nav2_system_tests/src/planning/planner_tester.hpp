@@ -33,7 +33,7 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/transform_stamped.hpp"
 #include "nav2_planner/planner_server.hpp"
-#include "tf2_ros/transform_broadcaster.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 
 namespace nav2_system_tests
 {
@@ -203,7 +203,7 @@ private:
 
   // The tester must provide the robot pose through a transform
   std::unique_ptr<geometry_msgs::msg::TransformStamped> base_transform_;
-  std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
+  nav2::TransformBroadcaster::SharedPtr tf_broadcaster_;
   rclcpp::TimerBase::SharedPtr transform_timer_;
   void publishRobotTransform();
   void startRobotTransform();
@@ -212,7 +212,6 @@ private:
   // Occupancy grid publisher for visualization
   nav2::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;
   rclcpp::TimerBase::SharedPtr map_timer_;
-  rclcpp::WallRate map_publish_rate_;
   void mapCallback();
 
   // Executes a test run with the provided end points.

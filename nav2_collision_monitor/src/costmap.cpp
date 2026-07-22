@@ -22,6 +22,7 @@
 #include <nav2_ros_common/node_utils.hpp>
 #include <nav2_ros_common/qos_profiles.hpp>
 #include <nav2_costmap_2d/cost_values.hpp>
+#include "nav2_ros_common/tf2_factories.hpp"
 
 namespace nav2_collision_monitor
 {
@@ -29,7 +30,7 @@ namespace nav2_collision_monitor
 CostmapSource::CostmapSource(
   const nav2::LifecycleNode::WeakPtr & node,
   const std::string & source_name,
-  const std::shared_ptr<tf2_ros::Buffer> tf_buffer,
+  const nav2::TransformBuffer::SharedPtr tf_buffer,
   const std::string & base_frame_id,
   const std::string & global_frame_id,
   const tf2::Duration & transform_tolerance,
@@ -103,7 +104,7 @@ bool CostmapSource::getData(
         const double wy = meta.origin.position.y + (y + 0.5) * meta.resolution;
         tf2::Vector3 p_v3_s(wx, wy, 0.0);
         tf2::Vector3 p_v3_b = tf_transform * p_v3_s;
-        data.push_back({p_v3_b.x(), p_v3_b.y()});
+        data.push_back({p_v3_b.x(), p_v3_b.y(), p_v3_b.z(), source_name_});
         RCLCPP_DEBUG_THROTTLE(
           logger_, *node->get_clock(), 2000 /*ms*/,
           "[%s] Found obstacles in costmap", source_name_.c_str());

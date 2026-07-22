@@ -14,17 +14,21 @@
 
 #include "nav2_route/route_tracker.hpp"
 
+#include "nav2_ros_common/rate.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
+
 namespace nav2_route
 {
 
 void RouteTracker::configure(
   nav2::LifecycleNode::SharedPtr node,
-  std::shared_ptr<tf2_ros::Buffer> tf_buffer,
+  nav2::TransformBuffer::SharedPtr tf_buffer,
   std::shared_ptr<nav2_costmap_2d::CostmapSubscriber> costmap_subscriber,
   std::shared_ptr<ActionServerTrack> action_server,
   const std::string & route_frame,
   const std::string & base_frame)
 {
+  node_ = node;
   clock_ = node->get_clock();
   logger_ = node->get_logger();
   route_frame_ = route_frame;
@@ -163,7 +167,12 @@ TrackerResult RouteTracker::trackRoute(
     publishFeedback(true, route.start_node->nodeid, 0, 0, {});
   }
 
-  rclcpp::Rate r(tracker_update_rate_);
+  auto node = node_.lock();
+  if (!node) {
+    throw nav2_core::RouteException("Route tracker node expired");
+  }
+
+  nav2::Rate r(node, tracker_update_rate_);
   while (rclcpp::ok()) {
     bool status_change = false, completed = false;
 

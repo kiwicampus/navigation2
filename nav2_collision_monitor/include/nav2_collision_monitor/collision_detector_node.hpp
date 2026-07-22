@@ -19,14 +19,14 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <unordered_map>
 
 #include "rclcpp/rclcpp.hpp"
 
 #include "tf2/time.hpp"
-#include "tf2_ros/buffer.hpp"
-#include "tf2_ros/transform_listener.hpp"
 
 #include "nav2_ros_common/lifecycle_node.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 #include "nav2_msgs/msg/collision_detector_state.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 
@@ -136,12 +136,20 @@ protected:
    */
   void publishPolygons() const;
 
+  /**
+   * @brief Publishes the points inside each detected polygon as markers,
+   * bucketed by polygon name and per-point source.
+   * @param all_triggering_points Map from polygon name to its triggering points.
+   */
+  void publishTriggeringPoints(
+    const std::unordered_map<std::string, std::vector<Point>> & all_triggering_points);
+
   // ----- Variables -----
 
   /// @brief TF buffer
-  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  nav2::TransformBuffer::SharedPtr tf_buffer_;
   /// @brief TF listener
-  std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
+  nav2::TransformListener::SharedPtr tf_listener_;
 
   /// @brief Polygons array
   std::vector<std::shared_ptr<Polygon>> polygons_;
@@ -154,11 +162,18 @@ protected:
   /// @brief Collision points marker publisher
   nav2::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
     collision_points_marker_pub_;
+  /// @brief Triggering points marker publisher (points inside each detected polygon)
+  nav2::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr
+    triggering_points_pub_;
   /// @brief timer that runs actions
   rclcpp::TimerBase::SharedPtr timer_;
 
   /// @brief main loop frequency
   double frequency_;
+  /// @brief Whether to include z in the collision_points_marker
+  bool collision_points_marker_3d_;
+  /// @brief Robot base frame ID
+  std::string base_frame_id_;
 };  // class CollisionDetector
 
 }  // namespace nav2_collision_monitor

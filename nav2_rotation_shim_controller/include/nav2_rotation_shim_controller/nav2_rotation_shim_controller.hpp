@@ -28,8 +28,8 @@
 #include "nav2_core/controller.hpp"
 #include "nav2_core/controller_exceptions.hpp"
 #include "nav2_costmap_2d/footprint_collision_checker.hpp"
-#include "nav2_controller/plugins/position_goal_checker.hpp"
 #include "nav2_rotation_shim_controller/parameter_handler.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 
 namespace nav2_rotation_shim_controller
 {
@@ -60,7 +60,7 @@ public:
    */
   void configure(
     const nav2::LifecycleNode::WeakPtr & parent,
-    std::string name, std::shared_ptr<tf2_ros::Buffer> tf,
+    std::string name, nav2::TransformBuffer::SharedPtr tf,
     std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros) override;
 
   /**
@@ -162,7 +162,7 @@ protected:
   bool isGoalChanged(const geometry_msgs::msg::PoseStamped & goal);
 
   nav2::LifecycleNode::WeakPtr node_;
-  std::shared_ptr<tf2_ros::Buffer> tf_;
+  nav2::TransformBuffer::SharedPtr tf_;
   std::string plugin_name_;
   rclcpp::Logger logger_ {rclcpp::get_logger("RotationShimController")};
   rclcpp::Clock::SharedPtr clock_;
@@ -178,7 +178,6 @@ protected:
   Parameters * params_;
   bool in_rotation_;
   double last_angular_vel_ = std::numeric_limits<double>::max();
-  std::unique_ptr<nav2_controller::PositionGoalChecker> position_goal_checker_;
   std::unique_ptr<nav2_rotation_shim_controller::ParameterHandler> param_handler_;
 };
 

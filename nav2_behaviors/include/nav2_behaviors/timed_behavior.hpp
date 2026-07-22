@@ -26,12 +26,12 @@
 #include <utility>
 
 #include "rclcpp/rclcpp.hpp"
-#include "tf2_ros/transform_listener.hpp"
-#include "tf2_ros/create_timer_ros.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav2_util/robot_utils.hpp"
 #include "nav2_util/twist_publisher.hpp"
 #include "nav2_ros_common/simple_action_server.hpp"
+#include "nav2_ros_common/rate.hpp"
 #include "nav2_core/behavior.hpp"
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
@@ -114,7 +114,7 @@ public:
   // configure the server on lifecycle setup
   void configure(
     const nav2::LifecycleNode::WeakPtr & parent,
-    const std::string & name, std::shared_ptr<tf2_ros::Buffer> tf,
+    const std::string & name, nav2::TransformBuffer::SharedPtr tf,
     std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker> local_collision_checker,
     std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker> global_collision_checker)
   override
@@ -182,7 +182,7 @@ protected:
   typename ActionServer::SharedPtr action_server_;
   std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker> local_collision_checker_;
   std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker> global_collision_checker_;
-  std::shared_ptr<tf2_ros::Buffer> tf_;
+  nav2::TransformBuffer::SharedPtr tf_;
 
   double cycle_frequency_;
   double enabled_;
@@ -226,7 +226,19 @@ protected:
     }
 
     auto start_time = clock_->now();
-    rclcpp::WallRate loop_rate(cycle_frequency_);
+    auto node = node_.lock();
+    if (!node) {
+      RCLCPP_ERROR(
+        logger_,
+        "Failed to run %s because the parent node is no longer available.",
+        behavior_name_.c_str());
+      result->error_msg = behavior_name_ + " failed: parent node expired";
+      result->total_elapsed_time = clock_->now() - start_time;
+      onActionCompletion(result);
+      action_server_->terminate_current(result);
+      return;
+    }
+    nav2::Rate loop_rate(node, cycle_frequency_);
 
     while (rclcpp::ok()) {
       elapsed_time_ = clock_->now() - start_time;
@@ -266,7 +278,7 @@ protected:
         case Status::FAILED:
           result->error_code = on_cycle_update_result.error_code;
           result->error_msg = behavior_name_ + " failed:" + on_cycle_update_result.error_msg;
-          RCLCPP_WARN(logger_, result->error_msg.c_str());
+          RCLCPP_WARN(logger_, "%s", result->error_msg.c_str());
           result->total_elapsed_time = clock_->now() - start_time;
           onActionCompletion(result);
           action_server_->terminate_current(result);

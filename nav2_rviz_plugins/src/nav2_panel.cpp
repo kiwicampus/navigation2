@@ -414,11 +414,19 @@ Nav2Panel::Nav2Panel(QWidget * parent)
     &QLineEdit::editingFinished,
     this,
     &Nav2Panel::loophandler);
+  #if QT_VERSION >= QT_VERSION_CHECK(6, 10, 2)
+  QObject::connect(
+    store_initial_pose_checkbox_,
+    &QCheckBox::checkStateChanged,
+    this,
+    &Nav2Panel::initialStateHandler);
+  #else
   QObject::connect(
     store_initial_pose_checkbox_,
     &QCheckBox::stateChanged,
     this,
     &Nav2Panel::initialStateHandler);
+  #endif
 
   // Start/Reset button click transitions
   initial_->addTransition(start_reset_button_, SIGNAL(clicked()), idle_);
@@ -479,7 +487,7 @@ Nav2Panel::Nav2Panel(QWidget * parent)
 
   auto options = rclcpp::NodeOptions().arguments(
     {"--ros-args", "--remap", "__node:=rviz_navigation_dialog_action_client", "--"});
-  client_node_ = std::make_shared<rclcpp::Node>("_", options);
+  client_node_ = std::make_shared<rclcpp::Node>("_", options);  //  nosemgrep
   executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
   executor_->add_node(client_node_);
 
@@ -668,25 +676,21 @@ Nav2Panel::Nav2Panel(QWidget * parent)
   setLayout(main_layout);
 
   navigation_action_client_ =
-    rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(
+    rclcpp_action::create_client<nav2_msgs::action::NavigateToPose>(  //  nosemgrep
     client_node_,
     "navigate_to_pose");
   waypoint_follower_action_client_ =
-    rclcpp_action::create_client<nav2_msgs::action::FollowWaypoints>(
+    rclcpp_action::create_client<nav2_msgs::action::FollowWaypoints>(  //  nosemgrep
     client_node_,
     "follow_waypoints");
   nav_through_poses_action_client_ =
-    rclcpp_action::create_client<nav2_msgs::action::NavigateThroughPoses>(
+    rclcpp_action::create_client<nav2_msgs::action::NavigateThroughPoses>(  //  nosemgrep
     client_node_,
     "navigate_through_poses");
 
   // Setting up tf for initial pose
-  tf2_buffer_ = std::make_shared<tf2_ros::Buffer>(client_node_->get_clock());
-  auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
-    client_node_->get_node_base_interface(),
-    client_node_->get_node_timers_interface());
-  tf2_buffer_->setCreateTimerInterface(timer_interface);
-  transform_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf2_buffer_);
+  tf2_buffer_ = nav2::create_transform_buffer(client_node_);
+  transform_listener_ = nav2::create_transform_listener(*tf2_buffer_);
 
   navigation_goal_ = nav2_msgs::action::NavigateToPose::Goal();
   waypoint_follower_goal_ = nav2_msgs::action::FollowWaypoints::Goal();
@@ -886,7 +890,7 @@ Nav2Panel::onInitialize()
       "Underlying ROS node no longer exists, initialization failed");
     return;
   }
-  rclcpp::Node::SharedPtr node = node_ptr_->get_raw_node();
+  rclcpp::Node::SharedPtr node = node_ptr_->get_raw_node();  //  nosemgrep
 
   // declaring parameter to get the base frame
   node->declare_parameter("base_frame", rclcpp::ParameterValue(std::string("base_footprint")));

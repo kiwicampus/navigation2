@@ -23,9 +23,9 @@
 #include "nav2_amcl/amcl_node.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <ctime>
-#include <cstdint>
 #include <iomanip>
 #include <memory>
 #include <string>
@@ -42,11 +42,7 @@
 #include "tf2/utils.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 #include "tf2/LinearMath/Transform.hpp"
-#include "tf2_ros/buffer.hpp"
-#include "tf2_ros/message_filter.hpp"
-#include "tf2_ros/transform_broadcaster.hpp"
-#include "tf2_ros/transform_listener.hpp"
-#include "tf2_ros/create_timer_ros.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 
 #include "nav2_amcl/portable_utils.hpp"
 #include "nav2_ros_common/validate_messages.hpp"
@@ -148,7 +144,7 @@ AmclNode::on_activate(const rclcpp_lifecycle::State & /*state*/)
 
   // Create pose save timer if save_pose_rate > 0
   if (save_pose_rate_ > 0.0) {
-    save_pose_timer_ = create_wall_timer(
+    save_pose_timer_ = this->create_timer(
       std::chrono::duration<double>(1.0 / save_pose_rate_),
       std::bind(&AmclNode::savePoseTimerCallback, this));
   }
@@ -1382,14 +1378,9 @@ AmclNode::initTransforms()
   RCLCPP_INFO(get_logger(), "initTransforms");
 
   // Initialize transform listener and broadcaster
-  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
-  auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
-    get_node_base_interface(),
-    get_node_timers_interface(),
-    callback_group_);
-  tf_buffer_->setCreateTimerInterface(timer_interface);
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_, this, true);
-  tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(shared_from_this());
+  tf_buffer_ = nav2::create_transform_buffer(this, callback_group_);
+  tf_listener_ = nav2::create_transform_listener(*tf_buffer_, this, true);
+  tf_broadcaster_ = nav2::create_transform_broadcaster(shared_from_this());
 
   sent_first_transform_ = false;
   latest_tf_valid_ = false;
@@ -1412,11 +1403,9 @@ AmclNode::initMessageFilters()
     scan_topic_, nav2::qos::SensorDataQoS().get_rmw_qos_profile(), sub_opt);
   #endif
 
-  laser_scan_filter_ = std::make_unique<tf2_ros::MessageFilter<sensor_msgs::msg::LaserScan>>(
+  laser_scan_filter_ = nav2::create_message_filter<sensor_msgs::msg::LaserScan>(
     *laser_scan_sub_, *tf_buffer_, odom_frame_id_, 10,
-    get_node_logging_interface(),
-    get_node_clock_interface(),
-    transform_tolerance_);
+    this, transform_tolerance_);
 
 
   laser_scan_connection_ = laser_scan_filter_->registerCallback(

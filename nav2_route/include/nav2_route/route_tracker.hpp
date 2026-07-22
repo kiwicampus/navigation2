@@ -16,7 +16,7 @@
 #include <string>
 #include <memory>
 
-#include "tf2_ros/transform_listener.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 #include "nav2_util/robot_utils.hpp"
 #include "nav2_ros_common/simple_action_server.hpp"
 #include "nav2_msgs/action/compute_and_track_route.hpp"
@@ -58,7 +58,7 @@ public:
    */
   void configure(
     nav2::LifecycleNode::SharedPtr node,
-    std::shared_ptr<tf2_ros::Buffer> tf_buffer,
+    nav2::TransformBuffer::SharedPtr tf_buffer,
     std::shared_ptr<nav2_costmap_2d::CostmapSubscriber> costmap_subscriber,
     typename ActionServerTrack::SharedPtr action_server,
     const std::string & route_frame,
@@ -124,9 +124,10 @@ protected:
   rclcpp::Logger logger_{rclcpp::get_logger("RouteTracker")};
   double radius_threshold_, boundary_radius_threshold_, tracker_update_rate_;
   bool aggregate_blocked_ids_;
+  nav2::LifecycleNode::WeakPtr node_;
   typename ActionServerTrack::SharedPtr action_server_;
   std::unique_ptr<OperationsManager> operations_manager_;
-  std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
+  nav2::TransformBuffer::SharedPtr tf_buffer_;
 };
 
 }  // namespace nav2_route

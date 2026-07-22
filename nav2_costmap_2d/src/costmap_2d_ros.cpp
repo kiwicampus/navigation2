@@ -40,6 +40,8 @@
 
 #include <memory>
 #include <chrono>
+#include <cmath>
+#include <stdexcept>
 #include <string>
 #include <vector>
 #include <utility>
@@ -47,8 +49,9 @@
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "nav2_util/execution_timer.hpp"
 #include "nav2_ros_common/node_utils.hpp"
+#include "nav2_ros_common/rate.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
-#include "tf2_ros/create_timer_ros.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 #include "nav2_util/robot_utils.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 
@@ -148,13 +151,8 @@ Costmap2DROS::on_configure(const rclcpp_lifecycle::State & /*state*/)
   }
 
   // Create the transform-related objects
-  tf_buffer_ = std::make_shared<tf2_ros::Buffer>(get_clock());
-  auto timer_interface = std::make_shared<tf2_ros::CreateTimerROS>(
-    get_node_base_interface(),
-    get_node_timers_interface(),
-    callback_group_);
-  tf_buffer_->setCreateTimerInterface(timer_interface);
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+  tf_buffer_ = nav2::create_transform_buffer(this, callback_group_);
+  tf_listener_ = nav2::create_transform_listener(*tf_buffer_);
 
   // Then load and add the plug-ins to the costmap
   for (unsigned int i = 0; i < plugin_names_.size(); ++i) {
@@ -477,7 +475,8 @@ Costmap2DROS::getParameters()
     }
   }
 
-  // 4. The width and height of map cannot be negative or 0 (to avoid abnoram memory usage)
+  // 4. The width, height, and resolution of map cannot be negative or 0
+  // (to avoid abnormal memory usage)
   if (map_width_meters_ <= 0) {
     RCLCPP_ERROR(
       get_logger(), "You try to set width of map to be negative or zero,"
@@ -488,11 +487,21 @@ Costmap2DROS::getParameters()
       get_logger(), "You try to set height of map to be negative or zero,"
       " this isn't allowed, please give a positive value.");
   }
+  if (resolution_ <= 0.0 || !std::isfinite(resolution_)) {
+    throw std::invalid_argument(
+            "Costmap resolution must be a positive finite value.");
+  }
 }
 
 void
 Costmap2DROS::setRobotFootprint(const std::vector<geometry_msgs::msg::Point> & points)
 {
+  if (points.empty()) {
+    RCLCPP_ERROR(
+      get_logger(), "You try to set an empty footprint"
+      " this isn't allowed, a footprint must contain at least one point.");
+    return;
+  }
   unpadded_footprint_ = points;
   padded_footprint_ = points;
   padFootprint(padded_footprint_, footprint_padding_);
@@ -532,7 +541,7 @@ Costmap2DROS::mapUpdateLoop(double frequency)
 
   RCLCPP_DEBUG(get_logger(), "Entering loop");
 
-  rclcpp::WallRate r(frequency);    // 200ms by default
+  nav2::Rate r(this, frequency);    // 200ms by default
 
   while (rclcpp::ok() && !map_update_thread_shutdown_) {
     nav2_util::ExecutionTimer timer;

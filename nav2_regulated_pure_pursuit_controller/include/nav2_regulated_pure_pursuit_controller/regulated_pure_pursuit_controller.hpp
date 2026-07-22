@@ -32,6 +32,7 @@
 #include "nav2_regulated_pure_pursuit_controller/parameter_handler.hpp"
 #include "nav2_regulated_pure_pursuit_controller/regulation_functions.hpp"
 #include "nav2_regulated_pure_pursuit_controller/dynamic_window_pure_pursuit_functions.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 
 namespace nav2_regulated_pure_pursuit_controller
 {
@@ -62,7 +63,7 @@ public:
    */
   void configure(
     const nav2::LifecycleNode::WeakPtr & parent,
-    std::string name, std::shared_ptr<tf2_ros::Buffer> tf,
+    std::string name, nav2::TransformBuffer::SharedPtr tf,
     std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros) override;
 
   /**
@@ -144,10 +145,19 @@ protected:
 
   /**
    * @brief Whether robot should rotate to final goal orientation
-   * @param carrot_pose current lookahead point
+   * @param goal_checker Goal checker instance for tolerances / state
+   * @param robot_pose Current robot pose in costmap's global frame
+   * @param goal_pose Goal pose in costmap's global frame
+   * @param speed Current robot speed
+   * @param transformed_plan The plan in the robot base frame
    * @return Whether should rotate to goal heading
    */
-  bool shouldRotateToGoalHeading(const geometry_msgs::msg::PoseStamped & carrot_pose);
+  bool shouldRotateToGoalHeading(
+    nav2_core::GoalChecker * goal_checker,
+    const geometry_msgs::msg::PoseStamped & robot_pose,
+    const geometry_msgs::msg::PoseStamped & goal_pose,
+    const geometry_msgs::msg::Twist & speed,
+    const nav_msgs::msg::Path & transformed_plan);
 
   /**
    * @brief Create a smooth and kinematically smoothed rotation command
@@ -174,19 +184,17 @@ protected:
     double & linear_vel, double & sign);
 
   nav2::LifecycleNode::WeakPtr node_;
-  std::shared_ptr<tf2_ros::Buffer> tf_;
+  nav2::TransformBuffer::SharedPtr tf_;
   std::string plugin_name_;
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
   nav2_costmap_2d::Costmap2D * costmap_;
   rclcpp::Logger logger_ {rclcpp::get_logger("RegulatedPurePursuitController")};
 
   Parameters * params_;
-  double goal_dist_tol_;
   double control_duration_;
   bool cancelling_ = false;
   bool finished_cancelling_ = false;
   bool is_rotating_to_heading_ = false;
-  bool has_reached_xy_tolerance_ = false;
   geometry_msgs::msg::Twist last_command_velocity_;
 
   nav2::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr carrot_pub_;

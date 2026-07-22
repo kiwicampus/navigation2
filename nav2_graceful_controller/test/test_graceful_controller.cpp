@@ -23,21 +23,24 @@
 #include "nav2_graceful_controller/smooth_control_law.hpp"
 #include "nav2_graceful_controller/graceful_controller.hpp"
 #include "nav2_util/path_utils.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 
 class SCLFixture : public nav2_graceful_controller::SmoothControlLaw
 {
 public:
   SCLFixture(
     double k_phi, double k_delta, double beta, double lambda,
-    double slowdown_radius, double v_linear_min, double v_linear_max, double v_angular_max)
+    double slowdown_radius, double deceleration_max,
+    double v_linear_min, double v_linear_max, double v_angular_max)
   : nav2_graceful_controller::SmoothControlLaw(k_phi, k_delta, beta, lambda,
-      slowdown_radius, v_linear_min, v_linear_max, v_angular_max) {}
+      slowdown_radius, deceleration_max, v_linear_min, v_linear_max, v_angular_max) {}
 
   double getCurvatureKPhi() {return k_phi_;}
   double getCurvatureKDelta() {return k_delta_;}
   double getCurvatureBeta() {return beta_;}
   double getCurvatureLambda() {return lambda_;}
   double getSlowdownRadius() {return slowdown_radius_;}
+  double getDecelMax() {return deceleration_max_;}
   double getSpeedLinearMin() {return v_linear_min_;}
   double getSpeedLinearMax() {return v_linear_max_;}
   double getSpeedAngularMax() {return v_angular_max_;}
@@ -78,7 +81,7 @@ public:
 
 TEST(SmoothControlLawTest, setCurvatureConstants) {
   // Initialize SmoothControlLaw
-  SCLFixture scl(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0);
+  SCLFixture scl(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0, 0);
 
   // Set curvature constants
   scl.setCurvatureConstants(1.0, 2.0, 3.0, 4.0);
@@ -86,17 +89,21 @@ TEST(SmoothControlLawTest, setCurvatureConstants) {
   // Set slowdown radius
   scl.setSlowdownRadius(5.0);
 
+  // Set max deceleration
+  scl.setMaxDeceleration(6.0);
+
   // Check results
   EXPECT_EQ(scl.getCurvatureKPhi(), 1.0);
   EXPECT_EQ(scl.getCurvatureKDelta(), 2.0);
   EXPECT_EQ(scl.getCurvatureBeta(), 3.0);
   EXPECT_EQ(scl.getCurvatureLambda(), 4.0);
   EXPECT_EQ(scl.getSlowdownRadius(), 5.0);
+  EXPECT_EQ(scl.getDecelMax(), 6.0);
 }
 
 TEST(SmoothControlLawTest, setSpeedLimits) {
   // Initialize SmoothControlLaw
-  SCLFixture scl(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  SCLFixture scl(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
 
   // Set speed limits
   scl.setSpeedLimit(1.0, 2.0, 3.0);
@@ -109,7 +116,7 @@ TEST(SmoothControlLawTest, setSpeedLimits) {
 
 TEST(SmoothControlLawTest, calculateCurvature) {
   // Initialize SmoothControlLaw
-  SCLFixture scl(1.0, 10.0, 0.2, 2.0, 0.1, 0.0, 1.0, 1.0);
+  SCLFixture scl(1.0, 10.0, 0.2, 2.0, 0.1, 2.5, 0.0, 1.0, 1.0);
 
   // Initialize target
   geometry_msgs::msg::Pose target;
@@ -144,7 +151,7 @@ TEST(SmoothControlLawTest, calculateCurvature) {
 
 TEST(SmoothControlLawTest, calculateRegularVelocity) {
   // Initialize SmoothControlLaw
-  SCLFixture scl(1.0, 10.0, 0.2, 2.0, 0.1, 0.0, 1.0, 1.0);
+  SCLFixture scl(1.0, 10.0, 0.2, 2.0, 0.1, 2.5, 0.0, 1.0, 1.0);
 
   // Initialize target
   geometry_msgs::msg::Pose target;
@@ -181,7 +188,7 @@ TEST(SmoothControlLawTest, calculateRegularVelocity) {
 
 TEST(SmoothControlLawTest, calculateNextPose) {
   // Initialize SmoothControlLaw
-  SCLFixture scl(1.0, 10.0, 0.2, 2.0, 0.1, 0.0, 1.0, 1.0);
+  SCLFixture scl(1.0, 10.0, 0.2, 2.0, 0.1, 2.5, 0.0, 1.0, 1.0);
 
   // Initialize target
   geometry_msgs::msg::Pose target;
@@ -205,7 +212,7 @@ TEST(SmoothControlLawTest, calculateNextPose) {
 
 TEST(GracefulControllerTest, dynamicParameters) {
   auto node = std::make_shared<nav2::LifecycleNode>("testGraceful");
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>("global_costmap");
 
   // Set initial rotation and allow backward to true so it warns and allow backward is false
@@ -243,6 +250,7 @@ TEST(GracefulControllerTest, dynamicParameters) {
       rclcpp::Parameter("test.v_angular_max", 10.0),
       rclcpp::Parameter("test.v_angular_min_in_place", 14.0),
       rclcpp::Parameter("test.slowdown_radius", 11.0),
+      rclcpp::Parameter("test.deceleration_max", 21.0),
       rclcpp::Parameter("test.initial_rotation", false),
       rclcpp::Parameter("test.initial_rotation_tolerance", 12.0),
       rclcpp::Parameter("test.prefer_final_rotation", false),
@@ -271,6 +279,7 @@ TEST(GracefulControllerTest, dynamicParameters) {
   EXPECT_EQ(node->get_parameter("test.v_angular_max").as_double(), 10.0);
   EXPECT_EQ(node->get_parameter("test.v_angular_min_in_place").as_double(), 14.0);
   EXPECT_EQ(node->get_parameter("test.slowdown_radius").as_double(), 11.0);
+  EXPECT_EQ(node->get_parameter("test.deceleration_max").as_double(), 21.0);
   EXPECT_EQ(node->get_parameter("test.initial_rotation").as_bool(), false);
   EXPECT_EQ(node->get_parameter("test.initial_rotation_tolerance").as_double(), 12.0);
   EXPECT_EQ(node->get_parameter("test.prefer_final_rotation").as_bool(), false);
@@ -325,7 +334,7 @@ TEST(GracefulControllerTest, dynamicParameters) {
 
 TEST(GracefulControllerTest, createSlowdownMsg) {
   auto node = std::make_shared<nav2::LifecycleNode>("testGraceful");
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>("global_costmap");
 
   // Create controller
@@ -377,7 +386,7 @@ TEST(GracefulControllerTest, createSlowdownMsg) {
 
 TEST(GracefulControllerTest, rotateToTarget) {
   auto node = std::make_shared<nav2::LifecycleNode>("testGraceful");
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>("global_costmap");
 
   // Create controller
@@ -428,7 +437,7 @@ TEST(GracefulControllerTest, rotateToTarget) {
 
 TEST(GracefulControllerTest, setSpeedLimit) {
   auto node = std::make_shared<nav2::LifecycleNode>("testGraceful");
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>("global_costmap");
 
   // Create controller
@@ -472,7 +481,7 @@ TEST(GracefulControllerTest, setSpeedLimit) {
 
 TEST(GracefulControllerTest, computeVelocityCommandRotate) {
   auto node = std::make_shared<nav2::LifecycleNode>("testGraceful");
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
 
   nav2::declare_parameter_if_not_declared(
     node, "test.v_angular_max", rclcpp::ParameterValue(1.0));
@@ -559,7 +568,7 @@ TEST(GracefulControllerTest, computeVelocityCommandRotate) {
 
 TEST(GracefulControllerTest, computeVelocityCommandRegular) {
   auto node = std::make_shared<nav2::LifecycleNode>("testGraceful");
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
 
   // Create a costmap of 10x10 meters
   auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>("test_costmap");
@@ -637,7 +646,7 @@ TEST(GracefulControllerTest, computeVelocityCommandRegular) {
 
 TEST(GracefulControllerTest, computeVelocityCommandRegularBackwards) {
   auto node = std::make_shared<nav2::LifecycleNode>("testGraceful");
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
   tf->setUsingDedicatedThread(true);
 
   // Set initial rotation false and allow backward to true
@@ -724,7 +733,7 @@ TEST(GracefulControllerTest, computeVelocityCommandRegularBackwards) {
 
 TEST(GracefulControllerTest, computeVelocityCommandFinal) {
   auto node = std::make_shared<nav2::LifecycleNode>("testGraceful");
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
 
   // Create a costmap of 10x10 meters
   auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>("test_costmap");
@@ -812,7 +821,7 @@ TEST(GracefulControllerTest, computeVelocityCommandFinal) {
 
 TEST(GracefulControllerTest, slowDownForObstacle) {
   auto node = std::make_shared<nav2::LifecycleNode>("testGraceful");
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
 
   // Create a costmap of 10x10 meters
   auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>("test_costmap");
@@ -919,7 +928,7 @@ TEST(GracefulControllerTest, slowDownForObstacle) {
 
 TEST(GracefulControllerTest, computeVelocityCommandObstacleMargin) {
   auto node = std::make_shared<nav2::LifecycleNode>("testGraceful");
-  auto tf = std::make_shared<tf2_ros::Buffer>(node->get_clock());
+  auto tf = nav2::create_transform_buffer(node);
 
   // Create a costmap of 10x10 meters
   auto costmap_ros = std::make_shared<nav2_costmap_2d::Costmap2DROS>("test_costmap");
@@ -1023,6 +1032,8 @@ TEST(GracefulControllerTest, computeVelocityCommandObstacleMargin) {
   robot_velocity.linear.x = 0.0;
   robot_velocity.linear.y = 0.0;
   geometry_msgs::msg::PoseStamped goal;
+  goal.pose.position.x = plan.poses.back().pose.position.x;
+  goal.pose.position.y = plan.poses.back().pose.position.y;
   auto cmd_vel_safe = controller->computeVelocityCommands(
     robot_pose, robot_velocity, &checker, transformed_plan1, goal);
 

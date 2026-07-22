@@ -19,6 +19,7 @@
 #include <exception>
 
 #include "nav2_ros_common/node_utils.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 
 namespace nav2_collision_monitor
 {
@@ -26,7 +27,7 @@ namespace nav2_collision_monitor
 Circle::Circle(
   const nav2::LifecycleNode::WeakPtr & node,
   const std::string & polygon_name,
-  const std::shared_ptr<tf2_ros::Buffer> tf_buffer,
+  const nav2::TransformBuffer::SharedPtr tf_buffer,
   const std::string & base_frame_id,
   const tf2::Duration & transform_tolerance)
 : Polygon::Polygon(node, polygon_name, tf_buffer, base_frame_id, transform_tolerance)
@@ -58,15 +59,33 @@ void Circle::getPolygon(std::vector<Point> & poly) const
   }
 }
 
-int Circle::getPointsInside(const std::vector<Point> & points) const
+int Circle::getPointsInside(
+  const std::vector<Point> & points,
+  std::vector<Point> & out_triggering_points) const
 {
   int num = 0;
   for (Point point : points) {
     if (point.x * point.x + point.y * point.y < radius_squared_) {
+      out_triggering_points.push_back(point);
       num++;
     }
   }
 
+  return num;
+}
+
+int Circle::getPointsInside(
+  const std::vector<Point> & points,
+  std::vector<std::size_t> & out_triggering_indices) const
+{
+  int num = 0;
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    const Point & point = points[i];
+    if (point.x * point.x + point.y * point.y < radius_squared_) {
+      out_triggering_indices.push_back(i);
+      num++;
+    }
+  }
   return num;
 }
 
@@ -147,7 +166,7 @@ void Circle::createSubscription(std::string & polygon_sub_topic)
   }
 }
 
-void Circle::updatePolygon(double radius)
+void Circle::updatePolygonFromRadius(double radius)
 {
   // Update circle radius
   radius_ = radius;
@@ -172,7 +191,7 @@ void Circle::radiusCallback(std_msgs::msg::Float32::ConstSharedPtr msg)
     logger_,
     "[%s]: Polygon circle radius update has been arrived",
     polygon_name_.c_str());
-  updatePolygon(msg->data);
+  updatePolygonFromRadius(msg->data);
 }
 
 }  // namespace nav2_collision_monitor

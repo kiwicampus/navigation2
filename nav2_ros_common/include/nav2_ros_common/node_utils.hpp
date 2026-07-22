@@ -25,7 +25,11 @@
 #include "rclcpp/rclcpp.hpp"
 #include "rcl_interfaces/srv/list_parameters.hpp"
 #include "pluginlib/exceptions.hpp"
+#if RCLCPP_VERSION_GTE(30, 1, 4)
+#include "ament_index_cpp/get_package_share_path.hpp"
+#else
 #include "ament_index_cpp/get_package_share_directory.hpp"
+#endif
 
 #ifdef __APPLE__
   #include <pthread.h>
@@ -439,8 +443,7 @@ inline void replaceOrAddArgument(
 inline std::string get_package_share_directory(const std::string & package_name)
 {
   #if RCLCPP_VERSION_GTE(30, 1, 4)
-  std::filesystem::path pkg_share_dir;
-  ament_index_cpp::get_package_share_directory(package_name, pkg_share_dir);
+  std::filesystem::path pkg_share_dir = ament_index_cpp::get_package_share_path(package_name);
   return pkg_share_dir.string();
   #else
   return ament_index_cpp::get_package_share_directory(package_name);

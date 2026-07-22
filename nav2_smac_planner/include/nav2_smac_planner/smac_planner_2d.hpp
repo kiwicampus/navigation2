@@ -33,23 +33,30 @@
 #include "nav2_ros_common/lifecycle_node.hpp"
 #include "nav2_ros_common/node_utils.hpp"
 #include "tf2/utils.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 
 namespace nav2_smac_planner
 {
 
-class SmacPlanner2D : public nav2_core::GlobalPlanner
+/**
+ * @class nav2_smac_planner::SmacPlanner2DT
+ * @brief A templated 2D planner that allows custom node types
+ * @tparam NodeT The node type to use (default: Node2D)
+ */
+template<typename NodeT = Node2D>
+class SmacPlanner2DT : public nav2_core::GlobalPlanner
 {
 public:
   /**
    * @brief constructor
    */
-  SmacPlanner2D();
+  SmacPlanner2DT();
 
   /**
    * @brief destructor
    */
-  ~SmacPlanner2D();
+  ~SmacPlanner2DT();
 
   /**
    * @brief Configuring plugin
@@ -60,7 +67,7 @@ public:
    */
   void configure(
     const nav2::LifecycleNode::WeakPtr & parent,
-    std::string name, std::shared_ptr<tf2_ros::Buffer> tf,
+    std::string name, nav2::TransformBuffer::SharedPtr tf,
     std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros) override;
 
   /**
@@ -111,10 +118,11 @@ protected:
    */
   void updateParametersCallback(const std::vector<rclcpp::Parameter> & parameters);
 
-  std::unique_ptr<AStarAlgorithm<Node2D>> _a_star;
+  std::unique_ptr<AStarAlgorithm<NodeT>> _a_star;
   GridCollisionChecker _collision_checker;
   std::unique_ptr<Smoother> _smoother;
   nav2_costmap_2d::Costmap2D * _costmap;
+  std::shared_ptr<nav2_costmap_2d::Costmap2DROS> _costmap_ros;
   std::unique_ptr<CostmapDownsampler> _costmap_downsampler;
   rclcpp::Clock::SharedPtr _clock;
   rclcpp::Logger _logger{rclcpp::get_logger("SmacPlanner2D")};
@@ -140,6 +148,11 @@ protected:
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr _on_set_params_handler;
 };
 
+// Backward-compatible type alias
+using SmacPlanner2D = SmacPlanner2DT<Node2D>;
+
 }  // namespace nav2_smac_planner
+
+#include "nav2_smac_planner/smac_planner_2d_impl.hpp"  // NOLINT
 
 #endif  // NAV2_SMAC_PLANNER__SMAC_PLANNER_2D_HPP_

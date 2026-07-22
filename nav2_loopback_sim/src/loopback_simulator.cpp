@@ -68,7 +68,7 @@ LoopbackSimulator::on_configure(const rclcpp_lifecycle::State & /*state*/)
   t_odom_to_base_link_.header.frame_id = odom_frame_id_;
   t_odom_to_base_link_.child_frame_id = base_frame_id_;
 
-  tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
+  tf_broadcaster_ = nav2::create_transform_broadcaster(this);
 
   // Subscriptions
   initial_pose_sub_ =
@@ -91,8 +91,8 @@ LoopbackSimulator::on_configure(const rclcpp_lifecycle::State & /*state*/)
 
   if (publish_scan_) {
     map_client_ = create_client<nav_msgs::srv::GetMap>("/map_server/map");
-    tf_buffer_ = std::make_shared<tf2_ros::Buffer>(this->get_clock());
-    tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+    tf_buffer_ = nav2::create_transform_buffer(this);
+    tf_listener_ = nav2::create_transform_listener(*tf_buffer_);
   }
 
   if (publish_clock_) {
@@ -123,8 +123,8 @@ LoopbackSimulator::on_activate(const rclcpp_lifecycle::State & /*state*/)
     scan_pub_->on_activate();
   }
 
-  setup_timer_ = rclcpp::create_timer(
-    this, get_clock(), 100ms,
+  setup_timer_ = this->create_timer(
+    100ms,
     std::bind(&LoopbackSimulator::setupTimerCallback, this));
 
   if (clock_publisher_) {
@@ -211,7 +211,7 @@ void LoopbackSimulator::getMap()
   auto request = std::make_shared<nav_msgs::srv::GetMap::Request>();
   map_client_->async_call(
     request,
-    [this](typename rclcpp::Client<nav_msgs::srv::GetMap>::SharedFuture future) {
+    [this](typename rclcpp::Client<nav_msgs::srv::GetMap>::SharedFuture future) {  //  nosemgrep
       auto response = future.get();
       if (response->map.info.width == 0 || response->map.info.height == 0 ||
       response->map.info.resolution <= 0.0)
@@ -297,17 +297,14 @@ void LoopbackSimulator::initialPoseCallback(
       setup_timer_->cancel();
       setup_timer_.reset();
     }
-    timer_ = rclcpp::create_timer(
-      this, get_clock(),
+    timer_ = this->create_timer(
       std::chrono::duration<double>(update_dur_),
       std::bind(&LoopbackSimulator::timerCallback, this));
-    odom_timer_ = rclcpp::create_timer(
-      this, get_clock(),
+    odom_timer_ = this->create_timer(
       std::chrono::duration<double>(odom_publish_dur_),
       std::bind(&LoopbackSimulator::odomTimerCallback, this));
     if (publish_scan_) {
-      scan_timer_ = rclcpp::create_timer(
-        this, get_clock(),
+      scan_timer_ = this->create_timer(
         std::chrono::duration<double>(scan_publish_dur_),
         std::bind(&LoopbackSimulator::publishLaserScan, this));
     }

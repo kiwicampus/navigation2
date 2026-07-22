@@ -28,6 +28,7 @@
 #include "nav2_graceful_controller/smooth_control_law.hpp"
 #include "nav_msgs/msg/path.hpp"
 #include "nav2_ros_common/lifecycle_node.hpp"
+#include "nav2_ros_common/tf2_factories.hpp"
 
 namespace opennav_docking
 {
@@ -47,7 +48,7 @@ public:
    * @param base_frame Robot base frame
    */
   Controller(
-    const nav2::LifecycleNode::SharedPtr & node, std::shared_ptr<tf2_ros::Buffer> tf,
+    const nav2::LifecycleNode::SharedPtr & node, nav2::TransformBuffer::SharedPtr tf,
     std::string fixed_frame, std::string base_frame);
 
   /**
@@ -133,11 +134,11 @@ protected:
   // Smooth control law
   std::unique_ptr<nav2_graceful_controller::SmoothControlLaw> control_law_;
   double k_phi_, k_delta_, beta_, lambda_;
-  double slowdown_radius_, v_linear_min_, v_linear_max_, v_angular_max_;
+  double slowdown_radius_, deceleration_max_, v_linear_min_, v_linear_max_, v_angular_max_;
   double rotate_to_heading_angular_vel_, rotate_to_heading_max_angular_accel_;
 
   // The trajectory of the robot while dock / undock for visualization / debug purposes
-  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr trajectory_pub_;
+  nav2::Publisher<nav_msgs::msg::Path>::SharedPtr trajectory_pub_;
 
   // Used for collision checking
   bool use_collision_detection_;
@@ -145,7 +146,7 @@ protected:
   double simulation_time_step_;
   double dock_collision_threshold_;
   double transform_tolerance_;
-  std::shared_ptr<tf2_ros::Buffer> tf2_buffer_;
+  nav2::TransformBuffer::SharedPtr tf2_buffer_;
   std::unique_ptr<nav2_costmap_2d::CostmapSubscriber> costmap_sub_;
   std::unique_ptr<nav2_costmap_2d::FootprintSubscriber> footprint_sub_;
   std::shared_ptr<nav2_costmap_2d::CostmapTopicCollisionChecker> collision_checker_;

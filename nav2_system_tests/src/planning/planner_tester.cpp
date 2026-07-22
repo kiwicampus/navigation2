@@ -20,6 +20,7 @@
 #include <memory>
 #include <iostream>
 #include <chrono>
+#include <thread>
 #include <sstream>
 #include <iomanip>
 
@@ -42,8 +43,7 @@ PlannerTester::PlannerTester()
   map_set_(false), costmap_set_(false),
   using_fake_costmap_(true), trinary_costmap_(true),
   track_unknown_space_(false), lethal_threshold_(100), unknown_cost_value_(-1),
-  testCostmapType_(TestCostmap::open_space), base_transform_(nullptr),
-  map_publish_rate_(100s)
+  testCostmapType_(TestCostmap::open_space), base_transform_(nullptr)
 {
 }
 
@@ -113,7 +113,7 @@ PlannerTester::~PlannerTester()
 void PlannerTester::startRobotTransform()
 {
   // Provide the robot pose transform
-  tf_broadcaster_ = std::make_shared<tf2_ros::TransformBroadcaster>(this);
+  tf_broadcaster_ = nav2::create_transform_broadcaster(this);
 
   // Set an initial pose
   geometry_msgs::msg::Point robot_position;
@@ -349,7 +349,7 @@ bool PlannerTester::defaultPlannerRandomTests(
     "Tested with %u tests. Planner failed on %u. Test time %ld ms",
     number_tests, num_fail, elapsed.count());
 
-  if ((num_fail / number_tests) > acceptable_fail_ratio) {
+  if ((static_cast<float>(num_fail) / static_cast<float>(number_tests)) > acceptable_fail_ratio) {
     return false;
   }
 
@@ -365,7 +365,7 @@ bool PlannerTester::plannerTest(
 
   // First make available the current robot position for the planner to take as starting point
   updateRobotPosition(robot_position);
-  sleep(0.05);
+  std::this_thread::sleep_for(50ms);
 
   // Then request to compute a path
   TaskStatus status = createPlan(goal, path);

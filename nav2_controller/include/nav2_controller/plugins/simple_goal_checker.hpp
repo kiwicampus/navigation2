@@ -100,20 +100,36 @@ public:
    * @brief Get the position and velocity tolerances
    * @param pose_tolerance Output parameter for pose tolerance
    * @param vel_tolerance Output parameter for velocity tolerance
+   * @param path_length_tolerance Output parameter for path length tolerance
    * @return true if tolerances are available, false otherwise
    */
   bool getTolerances(
     geometry_msgs::msg::Pose & pose_tolerance,
-    geometry_msgs::msg::Twist & vel_tolerance) override;
+    geometry_msgs::msg::Twist & vel_tolerance,
+    double & path_length_tolerance) override;
+
+  /**
+   * @brief Check if XY goal position has been reached (without considering yaw)
+   * @param query_pose The pose to check
+   * @param goal_pose The pose to check against
+   * @param velocity The robot's current velocity
+   * @param transformed_global_plan The global plan after being processed by the path handler
+   * @return True if XY goal is reached (position within tolerance, yaw ignored)
+   */
+  bool isGoalXYReached(
+    const geometry_msgs::msg::Pose & query_pose,
+    const geometry_msgs::msg::Pose & goal_pose,
+    const geometry_msgs::msg::Twist & velocity,
+    const nav_msgs::msg::Path & transformed_global_plan) override;
 
 protected:
   nav2::LifecycleNode::WeakPtr node_;
   rclcpp::Logger logger_{rclcpp::get_logger("simple_goal_checker")};
-  double xy_goal_tolerance_, yaw_goal_tolerance_, path_length_tolerance_;
+  double xy_goal_tolerance_, xy_goal_tolerance_buffer_, yaw_goal_tolerance_, path_length_tolerance_;
   bool stateful_, check_xy_;
   bool symmetric_yaw_tolerance_;
-  // Cached squared xy_goal_tolerance_
-  double xy_goal_tolerance_sq_;
+  // Cached squared xy_goal_tolerance_ and xy_goal_tolerance_reset_
+  double xy_goal_tolerance_sq_, xy_goal_tolerance_reset_sq_;
   // Dynamic parameters handler
   std::mutex mutex_;
   rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr post_set_params_handler_;
