@@ -301,7 +301,8 @@ void LayeredCostmap::setFootprint(const std::vector<geometry_msgs::msg::Point> &
     footprint_spec);
   // use atomic store here since footprint is used by various planners/controllers
   // and not otherwise locked
-  footprint_.store(
+  std::atomic_store(
+    &footprint_,
     std::make_shared<std::vector<geometry_msgs::msg::Point>>(footprint_spec));
   inscribed_radius_.store(std::get<0>(inside_outside));
   circumscribed_radius_.store(std::get<1>(inside_outside));

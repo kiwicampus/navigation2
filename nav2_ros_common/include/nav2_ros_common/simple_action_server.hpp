@@ -328,6 +328,8 @@ public:
         terminate_all();
         if (completion_callback_) {completion_callback_();}
         error_msg("Action callback is still running and missed deadline to stop");
+        // Don't block shutdown forever if the BT/action callback won't yield.
+        break;
       }
     }
 

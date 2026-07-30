@@ -93,7 +93,9 @@ protected:
   std::string robot_base_frame_;
   double transform_tolerance_;
   std::atomic_bool footprint_received_{false};
-  std::atomic<geometry_msgs::msg::PolygonStamped::ConstSharedPtr> footprint_;
+  // atomic_load/store keeps concurrent readers lock-free without std::atomic<shared_ptr>
+  // (not available as a complete type on GCC 13 / libstdc++).
+  geometry_msgs::msg::PolygonStamped::ConstSharedPtr footprint_;
   nav2::Subscription<geometry_msgs::msg::PolygonStamped>::SharedPtr footprint_sub_;
 };
 

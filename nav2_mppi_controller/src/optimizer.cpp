@@ -179,7 +179,10 @@ void Optimizer::getParams()
     {
       if (constraints_refresh_requested_) {
         settings_.constraints = settings_.base_constraints;
-        motion_model_->setConstraints(settings_.constraints, settings_.model_dt);
+        motion_model_->setConstraints(
+          settings_.constraints, settings_.model_dt,
+          settings_.model_delay_vx, settings_.model_delay_vy, settings_.model_delay_wz,
+          settings_.clamp_raw_controls);
         constraints_refresh_requested_ = false;
       }
 
