@@ -41,6 +41,17 @@ macro(nav2_package)
     add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-Wnon-virtual-dtor>")
   endif()
 
+  # Workspace nav2 headers must win over an apt nav2 copy that a dependency exporting the flat
+  # /opt/ros include dir makes visible first; BEFORE puts them ahead of every linked -isystem dir.
+  get_cmake_property(_nav2_vars VARIABLES)
+  foreach(_nav2_var ${_nav2_vars})
+    if(_nav2_var MATCHES "^nav2_[a-z0-9_]+_INCLUDE_DIRS$" AND ${_nav2_var})
+      include_directories(BEFORE SYSTEM ${${_nav2_var}})
+    endif()
+  endforeach()
+  unset(_nav2_vars)
+  unset(_nav2_var)
+
   option(COVERAGE_ENABLED "Enable code coverage" FALSE)
   if(COVERAGE_ENABLED)
     add_compile_options(--coverage)
