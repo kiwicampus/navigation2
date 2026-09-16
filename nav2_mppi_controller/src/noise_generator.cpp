@@ -196,6 +196,9 @@ void NoiseGenerator::reset(mppi::models::OptimizerSettings & settings, bool is_h
     vx_std_adaptive_ = settings_.sampling_std.vx;
     vy_std_adaptive_ = settings_.sampling_std.vy;
     wz_std_adaptive_ = settings_.sampling_std.wz;
+    ndistribution_vx_ = std::normal_distribution(0.0f, settings_.sampling_std.vx);
+    ndistribution_vy_ = std::normal_distribution(0.0f, settings_.sampling_std.vy);
+    ndistribution_wz_ = std::normal_distribution(0.0f, settings_.sampling_std.wz);
 
     noises_vx_.setZero(settings_.batch_size, settings_.time_steps);
     noises_vy_.setZero(settings_.batch_size, settings_.time_steps);
