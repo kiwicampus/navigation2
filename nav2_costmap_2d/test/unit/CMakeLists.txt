@@ -58,6 +58,12 @@ target_link_libraries(denoise_layer_test
   layers
 )
 
+ament_add_gtest(static_layer_erosion_test static_layer_erosion_test.cpp)
+target_link_libraries(static_layer_erosion_test
+  nav2_costmap_2d_core
+  layers
+)
+
 ament_add_gtest(lifecycle_test lifecycle_test.cpp)
 target_link_libraries(lifecycle_test
   nav2_costmap_2d_core

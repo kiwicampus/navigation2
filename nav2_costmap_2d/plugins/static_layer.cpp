@@ -40,7 +40,11 @@
 #include "nav2_costmap_2d/static_layer.hpp"
 
 #include <algorithm>
+#include <cmath>
+#include <limits>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "pluginlib/class_list_macros.hpp"
 #include "tf2/convert.h"
@@ -165,6 +169,9 @@ StaticLayer::getParameters()
   declareParameter("transform_tolerance", rclcpp::ParameterValue(0.0));
   declareParameter("map_topic", rclcpp::ParameterValue("map"));
   declareParameter("footprint_clearing_enabled", rclcpp::ParameterValue(false));
+  declareParameter("erosion_radius", rclcpp::ParameterValue(0.0));
+  declareParameter("erosion_ring_thickness", rclcpp::ParameterValue(0.2));
+  declareParameter("erosion_enabled", rclcpp::ParameterValue(false));
 
   auto node = node_.lock();
   if (!node) {
@@ -175,6 +182,9 @@ StaticLayer::getParameters()
   node->get_parameter(name_ + "." + "subscribe_to_updates", subscribe_to_updates_);
   node->get_parameter(name_ + "." + "footprint_clearing_enabled", footprint_clearing_enabled_);
   node->get_parameter(name_ + "." + "map_topic", map_topic_);
+  node->get_parameter(name_ + "." + "erosion_radius", erosion_radius_);
+  node->get_parameter(name_ + "." + "erosion_ring_thickness", erosion_ring_thickness_);
+  node->get_parameter(name_ + "." + "erosion_enabled", erosion_enabled_);
   map_topic_ = joinWithParentNamespace(map_topic_);
   node->get_parameter(
     name_ + "." + "map_subscribe_transient_local",
@@ -261,6 +271,10 @@ StaticLayer::processMap(const nav_msgs::msg::OccupancyGrid & new_map)
     }
   }
 
+  erosion_window_w_ = 0;
+  erosion_window_h_ = 0;
+  buildRawFreeMask(new_map);
+
   map_frame_ = new_map.header.frame_id;
 
   x_ = y_ = 0;
@@ -269,6 +283,190 @@ StaticLayer::processMap(const nav_msgs::msg::OccupancyGrid & new_map)
   has_updated_data_ = true;
 
   current_ = true;
+}
+
+void
+StaticLayer::buildRawFreeMask(const nav_msgs::msg::OccupancyGrid & new_map)
+{
+  erosion_raw_free_.clear();
+  erosion_raw_free_.shrink_to_fit();
+  erosion_window_free_.clear();
+  erosion_window_ring_.clear();
+  erosion_window_w_ = 0;
+  erosion_window_h_ = 0;
+  erosion_active_ = false;
+
+  if (erosion_radius_ <= 0.0) {
+    return;
+  }
+
+  const size_t num_cells = static_cast<size_t>(new_map.info.width) * new_map.info.height;
+  if (num_cells == 0 || new_map.data.size() != num_cells) {
+    RCLCPP_ERROR(logger_, "StaticLayer: malformed map, cannot erode the static map.");
+    return;
+  }
+  if (new_map.info.resolution <= 0.0) {
+    RCLCPP_ERROR(
+      logger_, "StaticLayer: map resolution is %f, cannot erode the static map. "
+      "Erosion disabled.", new_map.info.resolution);
+    return;
+  }
+
+  erosion_raw_free_.assign(num_cells, false);
+  size_t free_cells = 0;
+  for (size_t i = 0; i < num_cells; ++i) {
+    if (isRawFree(static_cast<unsigned char>(new_map.data[i]))) {
+      erosion_raw_free_[i] = true;
+      ++free_cells;
+    }
+  }
+
+  computeErosionOffsets();
+  erosion_active_ = erosion_enabled_ && !erosion_free_offsets_.empty();
+
+  RCLCPP_INFO(
+    logger_,
+    "StaticLayer: static map erosion ready over %zu drivable cells: grows the "
+    "drivable region by %.2fm and redraws a %.2fm boundary, computed per "
+    "costmap window. Currently %s.",
+    free_cells, erosion_radius_, erosion_ring_thickness_,
+    erosion_active_ ? "enabled" : "disabled");
+}
+
+void
+StaticLayer::computeErosionOffsets()
+{
+  erosion_free_offsets_.clear();
+  erosion_ring_offsets_.clear();
+  erosion_extent_ = 0;
+
+  if (erosion_radius_ <= 0.0 || resolution_ <= 0.0) {
+    return;
+  }
+
+  const double free_radius_cells = erosion_radius_ / resolution_;
+  const double ring_radius_cells = (erosion_radius_ + erosion_ring_thickness_) / resolution_;
+  // Radii are compared with a RELATIVE tolerance: radius / resolution is not
+  // exact in binary floating point, and info.resolution is a float32, so
+  // 1.0m / 0.1 yields 9.99999985 cells rather than 10. Without this the
+  // outermost cells of the disc are silently dropped (~0.15% of a real
+  // segmapping). The tolerance must scale with the radius, an absolute one is
+  // large enough at 3 cells and too small at 10.
+  constexpr double kRadiusRelativeTolerance = 1e-6;
+  const double free_radius_sq =
+    free_radius_cells * free_radius_cells * (1.0 + kRadiusRelativeTolerance);
+  const double ring_radius_sq =
+    ring_radius_cells * ring_radius_cells * (1.0 + kRadiusRelativeTolerance);
+  erosion_extent_ = static_cast<int>(std::ceil(ring_radius_cells));
+
+  for (int dy = -erosion_extent_; dy <= erosion_extent_; ++dy) {
+    for (int dx = -erosion_extent_; dx <= erosion_extent_; ++dx) {
+      const double dist_sq = static_cast<double>(dx) * dx + static_cast<double>(dy) * dy;
+      if (dist_sq <= free_radius_sq) {
+        erosion_free_offsets_.emplace_back(dx, dy);
+      } else if (dist_sq <= ring_radius_sq) {
+        erosion_ring_offsets_.emplace_back(dx, dy);
+      }
+    }
+  }
+}
+
+void
+StaticLayer::updateErosionWindow(int x0, int y0, int x1, int y1)
+{
+  if (!erosion_active_) {
+    return;
+  }
+
+  // Grow the requested rectangle by the ring radius: a drivable cell just
+  // outside it can still push the boundary into it.
+  const int map_w = static_cast<int>(size_x_);
+  const int map_h = static_cast<int>(size_y_);
+  const int wx0 = std::max(0, x0 - erosion_extent_);
+  const int wy0 = std::max(0, y0 - erosion_extent_);
+  const int wx1 = std::min(map_w - 1, x1 + erosion_extent_);
+  const int wy1 = std::min(map_h - 1, y1 + erosion_extent_);
+  if (wx1 < wx0 || wy1 < wy0) {
+    erosion_window_w_ = 0;
+    erosion_window_h_ = 0;
+    return;
+  }
+
+  const int width = wx1 - wx0 + 1;
+  const int height = wy1 - wy0 + 1;
+  if (wx0 == erosion_window_x_ && wy0 == erosion_window_y_ &&
+    width == erosion_window_w_ && height == erosion_window_h_)
+  {
+    return;  // the robot has not moved far enough to change the window
+  }
+
+  erosion_window_x_ = wx0;
+  erosion_window_y_ = wy0;
+  erosion_window_w_ = width;
+  erosion_window_h_ = height;
+  const size_t window_cells = static_cast<size_t>(width) * height;
+  erosion_window_free_.assign(window_cells, false);
+  erosion_window_ring_.assign(window_cells, false);
+
+  auto raw_free_at = [this, map_w](int mx, int my) {
+      return erosion_raw_free_[static_cast<size_t>(my) * map_w + mx];
+    };
+
+  // Seed the growth with the drivable cells that have a non-drivable
+  // 8-neighbour: only the border of the region can push the boundary outwards.
+  // Neighbours are read from the full map mask, so the window edges are not a
+  // special case.
+  std::vector<std::pair<int, int>> seeds;
+  for (int my = wy0; my <= wy1; ++my) {
+    for (int mx = wx0; mx <= wx1; ++mx) {
+      if (!raw_free_at(mx, my)) {
+        continue;
+      }
+      erosion_window_free_[static_cast<size_t>(my - wy0) * width + (mx - wx0)] = true;
+      bool on_border = false;
+      for (int dy = -1; dy <= 1 && !on_border; ++dy) {
+        for (int dx = -1; dx <= 1 && !on_border; ++dx) {
+          if (dx == 0 && dy == 0) {
+            continue;
+          }
+          const int nx = mx + dx;
+          const int ny = my + dy;
+          if (nx < 0 || ny < 0 || nx >= map_w || ny >= map_h) {
+            continue;
+          }
+          if (!raw_free_at(nx, ny)) {
+            on_border = true;
+          }
+        }
+      }
+      if (on_border) {
+        seeds.emplace_back(mx, my);
+      }
+    }
+  }
+
+  auto stamp = [&](const std::vector<std::pair<int, int>> & offsets, bool ring) {
+      for (const auto & seed : seeds) {
+        for (const auto & offset : offsets) {
+          const int lx = seed.first + offset.first - wx0;
+          const int ly = seed.second + offset.second - wy0;
+          if (lx < 0 || ly < 0 || lx >= width || ly >= height) {
+            continue;
+          }
+          const size_t index = static_cast<size_t>(ly) * width + lx;
+          if (!ring) {
+            erosion_window_free_[index] = true;
+          } else if (!erosion_window_free_[index]) {
+            // Tested against the finished free mask, so a cell is never both
+            // drivable and boundary and no second pass is needed.
+            erosion_window_ring_[index] = true;
+          }
+        }
+      }
+    };
+
+  stamp(erosion_free_offsets_, false);
+  stamp(erosion_ring_offsets_, true);
 }
 
 void
@@ -346,13 +544,27 @@ StaticLayer::incomingUpdate(map_msgs::msg::OccupancyGridUpdate::ConstSharedPtr u
     return;
   }
 
+  const bool track_erosion = !erosion_raw_free_.empty();
+
   unsigned int di = 0;
   for (unsigned int y = 0; y < update->height; y++) {
     unsigned int index_base = (update->y + y) * size_x_;
     for (unsigned int x = 0; x < update->width; x++) {
       unsigned int index = index_base + x + update->x;
+      const unsigned char raw = static_cast<unsigned char>(update->data[di]);
       costmap_[index] = interpretValue(update->data[di++]);
+      if (track_erosion) {
+        // Keep the drivable region in step with partial updates, otherwise the
+        // erosion would keep growing from cells the map no longer reports.
+        erosion_raw_free_[index] = isRawFree(raw);
+      }
     }
+  }
+
+  if (track_erosion) {
+    // Drop the cached window so it is rebuilt from the updated region.
+    erosion_window_w_ = 0;
+    erosion_window_h_ = 0;
   }
 
   has_updated_data_ = true;
@@ -444,7 +656,21 @@ StaticLayer::updateCosts(
 
   if (!layered_costmap_->isRolling()) {
     // if not rolling, the layered costmap (master_grid) has same coordinates as this layer
-    if (!use_maximum_) {
+    if (erosion_active_) {
+      updateErosionWindow(min_i, min_j, max_i - 1, max_j - 1);
+      // Same as updateWithTrueOverwrite/updateWithMax, but reading through the
+      // erosion masks instead of straight out of costmap_.
+      for (int j = min_j; j < max_j; ++j) {
+        for (int i = min_i; i < max_i; ++i) {
+          const unsigned char cost = getStaticCost(i, j);
+          if (!use_maximum_) {
+            master_grid.setCost(i, j, cost);
+          } else {
+            master_grid.setCost(i, j, std::max(cost, master_grid.getCost(i, j)));
+          }
+        }
+      }
+    } else if (!use_maximum_) {
       updateWithTrueOverwrite(master_grid, min_i, min_j, max_i, max_j);
     } else {
       updateWithMax(master_grid, min_i, min_j, max_i, max_j);
@@ -467,6 +693,33 @@ StaticLayer::updateCosts(
     tf2::Transform tf2_transform;
     tf2::fromMsg(transform.transform, tf2_transform);
 
+    if (erosion_active_) {
+      // Erode only the slice of the map this window reads. The transform is
+      // rigid, so the axis aligned box of the four transformed corners covers
+      // every cell the loop below can reach.
+      int rx0 = std::numeric_limits<int>::max();
+      int ry0 = std::numeric_limits<int>::max();
+      int rx1 = std::numeric_limits<int>::min();
+      int ry1 = std::numeric_limits<int>::min();
+      const int corners_i[4] = {min_i, max_i - 1, min_i, max_i - 1};
+      const int corners_j[4] = {min_j, min_j, max_j - 1, max_j - 1};
+      for (int corner = 0; corner < 4; ++corner) {
+        layered_costmap_->getCostmap()->mapToWorld(corners_i[corner], corners_j[corner], wx, wy);
+        tf2::Vector3 corner_point(wx, wy, 0);
+        corner_point = tf2_transform * corner_point;
+        // Not worldToMap(), which fails outside the map and would lose the bound.
+        const int cell_x =
+          static_cast<int>(std::floor((corner_point.x() - origin_x_) / resolution_));
+        const int cell_y =
+          static_cast<int>(std::floor((corner_point.y() - origin_y_) / resolution_));
+        rx0 = std::min(rx0, cell_x);
+        ry0 = std::min(ry0, cell_y);
+        rx1 = std::max(rx1, cell_x);
+        ry1 = std::max(ry1, cell_y);
+      }
+      updateErosionWindow(rx0, ry0, rx1, ry1);
+    }
+
     for (int i = min_i; i < max_i; ++i) {
       for (int j = min_j; j < max_j; ++j) {
         // Convert master_grid coordinates (i,j) into global_frame_(wx,wy) coordinates
@@ -476,10 +729,11 @@ StaticLayer::updateCosts(
         p = tf2_transform * p;
         // Set master_grid with cell from map
         if (worldToMap(p.x(), p.y(), mx, my)) {
+          const unsigned char cost = getStaticCost(mx, my);
           if (!use_maximum_) {
-            master_grid.setCost(i, j, getCost(mx, my));
+            master_grid.setCost(i, j, cost);
           } else {
-            master_grid.setCost(i, j, std::max(getCost(mx, my), master_grid.getCost(i, j)));
+            master_grid.setCost(i, j, std::max(cost, master_grid.getCost(i, j)));
           }
         }
       }
@@ -503,7 +757,21 @@ StaticLayer::dynamicParametersCallback(
     const auto & param_type = parameter.get_type();
     const auto & param_name = parameter.get_name();
 
-    if (param_name == name_ + "." + "map_subscribe_transient_local" ||
+    if (param_name == name_ + "." + "erosion_radius" ||
+      param_name == name_ + "." + "erosion_ring_thickness")
+    {
+      // Actually reject these, rather than only warning: the masks are built
+      // once from the whole map, so a new value would not be applied, and a
+      // parameter that reads back as changed while the layer keeps using the
+      // old one is a trap when debugging on a robot. Use erosion_enabled to
+      // turn the erosion on and off at runtime.
+      RCLCPP_WARN(
+        logger_, "%s is not a dynamic parameter and cannot be changed while "
+        "running. Rejecting parameter update.", param_name.c_str());
+      result.successful = false;
+      result.reason = param_name + " is a load time parameter of the static layer";
+      return result;
+    } else if (param_name == name_ + "." + "map_subscribe_transient_local" || // NOLINT
       param_name == name_ + "." + "map_topic" ||
       param_name == name_ + "." + "subscribe_to_updates")
     {
@@ -525,6 +793,32 @@ StaticLayer::dynamicParametersCallback(
         current_ = false;
       } else if (param_name == name_ + "." + "footprint_clearing_enabled") {
         footprint_clearing_enabled_ = parameter.as_bool();
+      } else if (param_name == name_ + "." + "erosion_enabled" && // NOLINT
+        erosion_enabled_ != parameter.as_bool())
+      {
+        erosion_enabled_ = parameter.as_bool();
+        erosion_active_ = erosion_enabled_ && !erosion_raw_free_.empty() &&
+          !erosion_free_offsets_.empty();
+        erosion_window_w_ = 0;
+        erosion_window_h_ = 0;
+        if (erosion_enabled_ && erosion_radius_ <= 0.0) {
+          RCLCPP_WARN(
+            logger_,
+            "StaticLayer: erosion_enabled was set but erosion_radius is 0, so "
+            "the erosion does nothing. Set erosion_radius > 0 at startup.");
+        } else if (erosion_enabled_ && erosion_raw_free_.empty()) {
+          RCLCPP_INFO(
+            logger_,
+            "StaticLayer: erosion_enabled was set before the map arrived. The "
+            "erosion will start as soon as the map is received.");
+        }
+
+        // Redraw the whole layer so the change is applied everywhere at once.
+        x_ = y_ = 0;
+        width_ = size_x_;
+        height_ = size_y_;
+        has_updated_data_ = true;
+        current_ = false;
       }
     }
   }

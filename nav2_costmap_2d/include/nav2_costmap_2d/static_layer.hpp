@@ -155,6 +155,68 @@ protected:
   unsigned char interpretValue(unsigned char value);
 
   /**
+   * @brief Cache which cells of the raw map belong to the drivable region
+   *
+   * Operates on the RAW occupancy values rather than on the interpreted
+   * costmap: with `track_unknown_space: false` unknown cells are interpreted
+   * as free space, which would otherwise make everything outside the corridor
+   * count as drivable and dissolve the boundary instead of shifting it.
+   *
+   * @param new_map The map to read the drivable region from
+   */
+  void buildRawFreeMask(const nav_msgs::msg::OccupancyGrid & new_map);
+
+  /**
+   * @brief Whether a raw map value belongs to the drivable region
+   * @param value Raw occupancy value, as stored in the map message
+   */
+  inline bool isRawFree(unsigned char value) const
+  {
+    return value != unknown_cost_value_ && value < lethal_threshold_;
+  }
+
+  /**
+   * @brief Precompute the disc offsets used to grow the drivable region
+   */
+  void computeErosionOffsets();
+
+  /**
+   * @brief Build the erosion masks for one rectangle of the map
+   *
+   * Only the cells the costmap window actually reads are eroded, which is
+   * ~550x less work than the whole map for the global costmap and ~3700x less
+   * for the local one. The rectangle is grown by the ring radius internally so
+   * that cells just outside it can still seed growth into it.
+   *
+   * @param x0 @param y0 @param x1 @param y1 Inclusive rectangle in map cells
+   */
+  void updateErosionWindow(int x0, int y0, int x1, int y1);
+
+  /**
+   * @brief Read a cell of this layer, applying the erosion when active
+   * @param mx The x coordinate of the cell in this layer
+   * @param my The y coordinate of the cell in this layer
+   * @return The (possibly eroded) cost of the cell
+   */
+  inline unsigned char getStaticCost(unsigned int mx, unsigned int my) const
+  {
+    if (erosion_active_) {
+      const int lx = static_cast<int>(mx) - erosion_window_x_;
+      const int ly = static_cast<int>(my) - erosion_window_y_;
+      if (lx >= 0 && ly >= 0 && lx < erosion_window_w_ && ly < erosion_window_h_) {
+        const size_t index = static_cast<size_t>(ly) * erosion_window_w_ + lx;
+        if (erosion_window_free_[index]) {
+          return FREE_SPACE;
+        }
+        if (erosion_window_ring_[index]) {
+          return LETHAL_OBSTACLE;
+        }
+      }
+    }
+    return getCost(mx, my);
+  }
+
+  /**
    * @brief Callback executed when a parameter change is detected
    * @param event ParameterEvent message
    */
@@ -198,6 +260,28 @@ protected:
   bool map_received_in_update_bounds_{false};
   tf2::Duration transform_tolerance_;
   nav_msgs::msg::OccupancyGrid::SharedPtr map_buffer_;
+
+  // Static map erosion. `erosion_radius_` and `erosion_ring_thickness_` are
+  // load time only (the disc offsets are precomputed from them);
+  // `erosion_enabled_` is a free runtime toggle so the way metadata can flip it
+  // on every way transition.
+  double erosion_radius_{0.0};
+  double erosion_ring_thickness_{0.0};
+  bool erosion_enabled_{false};
+  bool erosion_active_{false};
+  // Drivable region of the raw map, one bit per cell. This is the only full
+  // map sized state the erosion keeps; the masks themselves are windowed.
+  std::vector<bool> erosion_raw_free_;
+  std::vector<std::pair<int, int>> erosion_free_offsets_;
+  std::vector<std::pair<int, int>> erosion_ring_offsets_;
+  int erosion_extent_{0};
+  // Erosion masks for the currently cached window, in map cells.
+  int erosion_window_x_{0};
+  int erosion_window_y_{0};
+  int erosion_window_w_{0};
+  int erosion_window_h_{0};
+  std::vector<bool> erosion_window_free_;
+  std::vector<bool> erosion_window_ring_;
   // Dynamic parameters handler
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
 };
