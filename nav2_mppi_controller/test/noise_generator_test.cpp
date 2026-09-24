@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <chrono>
+#include <cmath>
 #include <thread>
 
 #include "gtest/gtest.h"
@@ -200,6 +201,57 @@ TEST(NoiseGeneratorTest, NoiseGeneratorMainNoRegenerate)
   EXPECT_EQ(state.cvx(0, 9), initial_cvx_9);
   EXPECT_EQ(state.cvy(0, 9), initial_cvy_9);  // Not populated in non-holonomic
   EXPECT_EQ(state.cwz(0, 9), initial_cwz_9);
+
+  generator.shutdown();
+}
+
+TEST(NoiseGeneratorTest, WzStdDecaysWithSpeed)
+{
+  auto node = std::make_shared<nav2::LifecycleNode>("node");
+  node->declare_parameter("test_name.regenerate_noises", rclcpp::ParameterValue(true));
+  std::string name = "test";
+  ParametersHandler handler(node, name);
+  NoiseGenerator generator;
+  mppi::models::OptimizerSettings settings;
+  settings.batch_size = 2000;
+  settings.time_steps = 25;
+  settings.sampling_std.vx = 0.2;
+  settings.sampling_std.wz = 0.7;
+  settings.advanced_constraints.wz_std_decay_to = 0.2;
+  settings.advanced_constraints.wz_std_decay_strength = 4.0;
+
+  mppi::models::ControlSequence control_sequence;
+  control_sequence.reset(settings.time_steps);
+  mppi::models::State state;
+  state.reset(settings.batch_size, settings.time_steps);
+
+  generator.initialize(settings, false, "test_name", &handler);
+  generator.reset(settings, false);
+  EXPECT_NEAR(generator.getWzStdAdaptive(), 0.7, 1e-6);
+
+  // At 1.5 m/s: (0.7 - 0.2) * e^(-4 * 1.5) + 0.2
+  state.speed.linear.x = 1.5;
+  generator.setNoisedControls(state, control_sequence);
+  const float expected = 0.5f * std::exp(-6.0f) + 0.2f;
+  EXPECT_NEAR(generator.getWzStdAdaptive(), expected, 1e-5);
+
+  // Next noises are sampled with the decayed std
+  generator.generateNextNoises();
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  generator.setNoisedControls(state, control_sequence);
+  const float sampled_std = std::sqrt(state.cwz.square().mean());
+  EXPECT_NEAR(sampled_std, expected, 0.02);
+
+  // Decay is symmetric for reverse motion
+  state.speed.linear.x = -1.5;
+  generator.setNoisedControls(state, control_sequence);
+  EXPECT_NEAR(generator.getWzStdAdaptive(), expected, 1e-5);
+
+  // Invalid decay target disables the decay
+  settings.advanced_constraints.wz_std_decay_to = 1.0;
+  generator.reset(settings, false);
+  generator.setNoisedControls(state, control_sequence);
+  EXPECT_NEAR(generator.getWzStdAdaptive(), 0.7, 1e-6);
 
   generator.shutdown();
 }

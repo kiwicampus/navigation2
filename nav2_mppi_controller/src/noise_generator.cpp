@@ -14,6 +14,7 @@
 
 #include "nav2_mppi_controller/tools/noise_generator.hpp"
 
+#include <cmath>
 #include <memory>
 #include <mutex>
 
@@ -69,6 +70,9 @@ void NoiseGenerator::setNoisedControls(
 {
   std::unique_lock<std::mutex> guard(noise_lock_);
 
+  // Updates the std used by the next noise generation
+  computeAdaptiveStds(state);
+
   state.cvx = noises_vx_.rowwise() + control_sequence.vx.transpose();
   state.cvy = noises_vy_.rowwise() + control_sequence.vy.transpose();
   state.cwz = noises_wz_.rowwise() + control_sequence.wz.transpose();
@@ -82,6 +86,15 @@ void NoiseGenerator::reset(mppi::models::OptimizerSettings & settings, bool is_h
   // Recompute the noises on reset, initialization, and fallback
   {
     std::unique_lock<std::mutex> guard(noise_lock_);
+    ndistribution_vx_ = std::normal_distribution(0.0f, settings_.sampling_std.vx);
+    ndistribution_vy_ = std::normal_distribution(0.0f, settings_.sampling_std.vy);
+    wz_std_adaptive_ = settings_.sampling_std.wz;
+    if (!validateWzStdDecayConstraints()) {
+      RCLCPP_WARN(
+        rclcpp::get_logger("NoiseGenerator"),
+        "advanced.wz_std_decay_to (%f) must be between 0 and wz_std (%f), decay disabled.",
+        settings_.advanced_constraints.wz_std_decay_to, settings_.sampling_std.wz);
+    }
     noises_vx_.setZero(settings_.batch_size, settings_.time_steps);
     noises_vy_.setZero(settings_.batch_size, settings_.time_steps);
     noises_wz_.setZero(settings_.batch_size, settings_.time_steps);
@@ -93,6 +106,37 @@ void NoiseGenerator::reset(mppi::models::OptimizerSettings & settings, bool is_h
   } else {
     generateNoisedControls();
   }
+}
+
+float NoiseGenerator::getWzStdAdaptive()
+{
+  std::unique_lock<std::mutex> guard(noise_lock_);
+  return wz_std_adaptive_;
+}
+
+void NoiseGenerator::computeAdaptiveStds(const models::State & state)
+{
+  const auto & s = settings_;
+  const auto & c = s.advanced_constraints;
+  if (c.wz_std_decay_strength <= 0.0f || !validateWzStdDecayConstraints()) {
+    wz_std_adaptive_ = s.sampling_std.wz;
+    return;
+  }
+
+  const float vx = static_cast<float>(state.speed.linear.x);
+  const float speed = is_holonomic_ ?
+    hypotf(vx, static_cast<float>(state.speed.linear.y)) : std::fabs(vx);
+  wz_std_adaptive_ = (s.sampling_std.wz - c.wz_std_decay_to) *
+    std::exp(-c.wz_std_decay_strength * speed) + c.wz_std_decay_to;
+}
+
+bool NoiseGenerator::validateWzStdDecayConstraints() const
+{
+  const auto & c = settings_.advanced_constraints;
+  if (c.wz_std_decay_strength <= 0.0f) {
+    return true;
+  }
+  return c.wz_std_decay_to >= 0.0f && c.wz_std_decay_to <= settings_.sampling_std.wz;
 }
 
 void NoiseGenerator::noiseThread()
@@ -108,6 +152,7 @@ void NoiseGenerator::noiseThread()
 void NoiseGenerator::generateNoisedControls()
 {
   auto & s = settings_;
+  ndistribution_wz_.param(std::normal_distribution<float>::param_type(0.0f, wz_std_adaptive_));
   noises_vx_ = Eigen::ArrayXXf::NullaryExpr(
     s.batch_size, s.time_steps, [&]() {return ndistribution_vx_(generator_);});
   noises_wz_ = Eigen::ArrayXXf::NullaryExpr(

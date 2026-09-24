@@ -36,6 +36,30 @@ struct ControlConstraints
 };
 
 /**
+ * @struct mppi::models::AdvancedConstraints
+ * @brief Speed dependent sampling parameters
+ */
+struct AdvancedConstraints
+{
+  /**
+   * @brief Strength of the wz_std decay as a function of the robot linear speed.
+   * High wz_std at high speed produces laterally spread trajectories that make the
+   * robot oscillate and prefer slower samples. Decaying wz_std as speed increases
+   * keeps maneuverability at low speed and stability at high speed.
+   * <pre>f(v) = (wz_std - wz_std_decay_to) * e^(-wz_std_decay_strength * v) + wz_std_decay_to</pre>
+   * Default: -1.0 (disabled)
+   */
+  float wz_std_decay_strength;
+
+  /**
+   * @brief Target wz_std value while linear speed goes to infinity.
+   * Must be between 0 and wz_std. Has no effect if wz_std_decay_strength <= 0.0
+   * Default: 0.0
+   */
+  float wz_std_decay_to;
+};
+
+/**
  * @struct mppi::models::SamplingStd
  * @brief Noise parameters for sampling trajectories
  */

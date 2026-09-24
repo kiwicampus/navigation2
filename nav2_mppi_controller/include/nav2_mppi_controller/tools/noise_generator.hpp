@@ -80,7 +80,26 @@ public:
    */
   void reset(mppi::models::OptimizerSettings & settings, bool is_holonomic);
 
+  /**
+   * @brief Get the wz standard deviation currently used to sample noises,
+   * which decays with the robot speed if advanced.wz_std_decay_strength > 0
+   * @return Current wz standard deviation
+   */
+  float getWzStdAdaptive();
+
 protected:
+  /**
+   * @brief Update the wz standard deviation using the robot speed
+   * @param state Current robot state
+   */
+  void computeAdaptiveStds(const models::State & state);
+
+  /**
+   * @brief Check the wz_std decay parameters are consistent
+   * @return True if valid or decay is disabled
+   */
+  bool validateWzStdDecayConstraints() const;
+
   /**
    * @brief Thread to execute noise generation process
    */
@@ -106,6 +125,7 @@ protected:
 
   mppi::models::OptimizerSettings settings_;
   bool is_holonomic_;
+  float wz_std_adaptive_{0.0f};
 
   std::thread noise_thread_;
   std::condition_variable noise_cond_;
