@@ -36,15 +36,17 @@ target_include_directories(${library_name} PUBLIC
   "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
 )
 
-add_executable(lifecycle_bringup
-  lifecycle_bringup_commandline.cpp
-)
-target_link_libraries(lifecycle_bringup PRIVATE ${library_name} rclcpp::rclcpp)
-
-add_executable(base_footprint_publisher
-  base_footprint_publisher.cpp
-)
-target_link_libraries(base_footprint_publisher PRIVATE ${library_name} rclcpp::rclcpp ${tf2_msgs_TARGETS})
+# lifecycle_bringup/base_footprint_publisher fail to build on Humble (unrelated API gaps) and
+# nothing in this repo uses either; left unbuilt rather than patched.
+# add_executable(lifecycle_bringup
+#   lifecycle_bringup_commandline.cpp
+# )
+# target_link_libraries(lifecycle_bringup PRIVATE ${library_name} rclcpp::rclcpp)
+#
+# add_executable(base_footprint_publisher
+#   base_footprint_publisher.cpp
+# )
+# target_link_libraries(base_footprint_publisher PRIVATE ${library_name} rclcpp::rclcpp ${tf2_msgs_TARGETS})
 
 install(TARGETS
   ${library_name}
@@ -52,9 +54,4 @@ install(TARGETS
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
-)
-
-install(TARGETS
-  lifecycle_bringup
-  RUNTIME DESTINATION lib/${PROJECT_NAME}
 )

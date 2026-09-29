@@ -55,7 +55,8 @@ public:
       const std::shared_ptr<RequestType> request, std::shared_ptr<ResponseType> response) {
         this->callback_(request_header, request, response);
       },
-      rclcpp::ServicesQoS(),  // Use consistent QoS settings
+      // Humble's rclcpp::create_service takes a raw rmw_qos_profile_t, not an rclcpp::QoS object.
+      rclcpp::ServicesQoS().get_rmw_qos_profile(),  // Use consistent QoS settings
       callback_group);
 
     nav2::setIntrospectionMode(
