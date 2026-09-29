@@ -62,55 +62,14 @@ target_link_libraries(${executable_name} PRIVATE
   nav2_ros_common::nav2_ros_common
 )
 
-add_library(nav2_navigate_to_pose_navigator SHARED src/navigators/navigate_to_pose.cpp)
-target_include_directories(nav2_navigate_to_pose_navigator
-  PUBLIC
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
-)
-target_link_libraries(nav2_navigate_to_pose_navigator PUBLIC
-  ${geometry_msgs_TARGETS}
-  nav2_core::nav2_core
-  ${nav2_msgs_TARGETS}
-  nav2_util::nav2_util_core
-  nav2_ros_common::nav2_ros_common
-  ${nav_msgs_TARGETS}
-  rclcpp::rclcpp
-  rclcpp_action::rclcpp_action
-)
-target_link_libraries(nav2_navigate_to_pose_navigator PRIVATE
-  ament_index_cpp::ament_index_cpp
-  nav2_behavior_tree::nav2_behavior_tree
-  pluginlib::pluginlib
-  rclcpp_lifecycle::rclcpp_lifecycle
-)
-
-add_library(nav2_navigate_through_poses SHARED src/navigators/navigate_through_poses.cpp)
-target_include_directories(nav2_navigate_through_poses
-  PUBLIC
-    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-    "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
-)
-target_link_libraries(nav2_navigate_through_poses PUBLIC
-  ${geometry_msgs_TARGETS}
-  nav2_core::nav2_core
-  ${nav2_msgs_TARGETS}
-  ${nav_msgs_TARGETS}
-  nav2_util::nav2_util_core
-  nav2_ros_common::nav2_ros_common
-  rclcpp::rclcpp
-  rclcpp_action::rclcpp_action
-)
-target_link_libraries(nav2_navigate_through_poses PRIVATE
-  ament_index_cpp::ament_index_cpp
-  pluginlib::pluginlib
-  rclcpp_lifecycle::rclcpp_lifecycle
-)
-
-pluginlib_export_plugin_description_file(nav2_core navigator_plugins.xml)
+# nav2_navigate_to_pose_navigator / nav2_navigate_through_poses (src/navigators/*.cpp) are not
+# built here: both instantiate BehaviorTreeNavigator<ActionT>::on_configure(), which calls
+# rclcpp::copy_all_parameter_values(), unavailable in ROS 2 Humble's rclcpp (the actual robot
+# deployment target). This repo only needs the generic BtNavigator host plus its own
+# manipulation::ManipulationNavigator plugin, not nav2's stock navigators.
 rclcpp_components_register_nodes(${library_name} "nav2_bt_navigator::BtNavigator")
 
-install(TARGETS ${library_name} nav2_navigate_to_pose_navigator nav2_navigate_through_poses
+install(TARGETS ${library_name}
   EXPORT export_${library_name}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -133,7 +92,7 @@ if(BUILD_TESTING)
 endif()
 
 ament_export_include_directories(include/${PROJECT_NAME})
-ament_export_libraries(${library_name} nav2_navigate_to_pose_navigator nav2_navigate_through_poses)
+ament_export_libraries(${library_name})
 ament_export_dependencies(geometry_msgs nav2_core nav2_msgs nav2_util nav2_ros_common nav_msgs pluginlib rclcpp rclcpp_action tf2_ros)
 ament_export_targets(export_${library_name})
 ament_package()

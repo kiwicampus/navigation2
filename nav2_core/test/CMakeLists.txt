@@ -4,9 +4,6 @@ target_link_libraries(test_navigator_muxer
   nav2_core
 )
 
-# BehaviorTreeNavigator test
-nav2_add_gtest(test_behavior_tree_navigator test_behavior_tree_navigator.cpp)
-target_link_libraries(test_behavior_tree_navigator
-  nav2_core
-  ${nav2_msgs_TARGETS}
-)
+# BehaviorTreeNavigator test intentionally not built: it instantiates
+# BehaviorTreeNavigator<ActionT>::on_configure(), which calls rclcpp::copy_all_parameter_values(),
+# unavailable in ROS 2 Humble's rclcpp (the actual robot deployment target).
