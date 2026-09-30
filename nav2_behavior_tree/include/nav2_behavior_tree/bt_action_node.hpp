@@ -49,7 +49,8 @@ public:
   BtActionNode(
     const std::string & xml_tag_name,
     const std::string & action_name,
-    const BT::NodeConfiguration & conf)
+    const BT::NodeConfiguration & conf,
+    bool wait_for_server = true)
   : BT::ActionNodeBase(xml_tag_name, conf), action_name_(action_name), should_send_goal_(true)
   {
     node_ = config().blackboard->template get<nav2::LifecycleNode::SharedPtr>("node");
@@ -77,7 +78,7 @@ public:
     if (getInput("server_name", remapped_action_name)) {
       action_name_ = remapped_action_name;
     }
-    createActionClient(action_name_);
+    createActionClient(action_name_, wait_for_server);
 
     // Give the derive class a chance to do any initialization
     RCLCPP_DEBUG(node_->get_logger(), "\"%s\" BtActionNode initialized", xml_tag_name.c_str());
@@ -92,11 +93,17 @@ public:
   /**
    * @brief Create instance of an action client
    * @param action_name Action name to create client for
+   * @param wait_for_server Whether to block waiting for the server; false for a leaf whose
+   * server isn't guaranteed up before tree activation, which checks readiness itself elsewhere
    */
-  void createActionClient(const std::string & action_name)
+  void createActionClient(const std::string & action_name, bool wait_for_server = true)
   {
     // Now that we have the ROS node to use, create the action client for this BT action
     action_client_ = node_->create_action_client<ActionT>(action_name, callback_group_);
+
+    if (!wait_for_server) {
+      return;
+    }
 
     // Make sure the server is actually there before continuing
     RCLCPP_DEBUG(node_->get_logger(), "Waiting for \"%s\" action server", action_name.c_str());
@@ -160,6 +167,18 @@ public:
   }
 
   /**
+   * @brief Function letting a derived leaf end the node early, purely from feedback content,
+   * without waiting for the underlying action itself to reach a terminal state. Returns
+   * RUNNING by default (keep waiting, same as a leaf that only overrides on_wait_for_result()).
+   * @param feedback shared_ptr to latest feedback message, nullptr if no new feedback arrived
+   */
+  virtual BT::NodeStatus on_feedback_decision(
+    std::shared_ptr<const typename ActionT::Feedback>/*feedback*/)
+  {
+    return BT::NodeStatus::RUNNING;
+  }
+
+  /**
    * @brief Function to perform some user-defined operation upon successful
    * completion of the action. Could put a value on the blackboard.
    * @return BT::NodeStatus Returns SUCCESS by default, user may override return another value
@@ -210,6 +229,10 @@ public:
       // Clear the input and output messages to make sure we have no leftover from previous calls
       goal_ = typename ActionT::Goal();
       result_ = typename rclcpp_action::ClientGoalHandle<ActionT>::WrappedResult();
+      // This branch falls through into the result/feedback-checking code below within the
+      // same tick(), before the new goal's own first feedback can possibly have arrived: a
+      // leftover feedback_ from the previous goal must not be mistaken for the new one's.
+      feedback_.reset();
 
       // user defined callback, may modify "should_send_goal_".
       on_tick();
@@ -250,8 +273,15 @@ public:
         // user defined callback. May modify the value of "goal_updated_"
         on_wait_for_result(feedback_);
 
+        // user defined callback: may end this node early from feedback content alone
+        auto early_status = on_feedback_decision(feedback_);
+
         // reset feedback to avoid stale information
         feedback_.reset();
+
+        if (early_status != BT::NodeStatus::RUNNING) {
+          return early_status;
+        }
 
         auto goal_status = goal_handle_->get_status();
         if (goal_updated_ &&
