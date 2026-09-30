@@ -536,6 +536,40 @@ SemanticSegmentationLayer::dynamicParametersCallback(
     if (type == rclcpp::ParameterType::PARAMETER_BOOL) {
       if (name == name_ + "." + "enabled") {
         enabled_ = parameter.as_bool();
+      } else {
+        // dominant_priority is declared as a bool, so it arrives here. Its handler used to sit
+        // in the PARAMETER_INTEGER branch below, which a bool never reaches: setting it did
+        // nothing and reported success.
+        std::stringstream bool_ss(topics_string_);
+        std::string bool_source;
+        while (bool_ss >> bool_source) {
+          for (auto & buffer : segmentation_buffers_) {
+            if (buffer->getBufferSource() != bool_source) {
+              continue;
+            }
+            for (auto & class_type : buffer->getClassTypes()) {
+              if (name != name_ + "." + bool_source + "." + class_type + ".dominant_priority") {
+                continue;
+              }
+              std::vector<std::string> class_names_for_type;
+              node_.lock()->get_parameter(
+                name_ + "." + bool_source + "." + class_type + ".classes", class_names_for_type);
+              for (auto & class_name : class_names_for_type) {
+                if (!buffer->hasClassName(class_name)) {
+                  RCLCPP_WARN(
+                    logger_,
+                    "Ignoring %s: class '%s' is not known yet, the labelinfo topic has not "
+                    "been received. Set it again once segmentation is running.",
+                    name.c_str(), class_name.c_str());
+                  continue;
+                }
+                CostHeuristicParams cost_params = buffer->getCostForClassName(class_name);
+                cost_params.dominant_priority = parameter.as_bool();
+                buffer->updateClassMap(class_name, cost_params);
+              }
+            }
+          }
+        }
       }
     }
 
@@ -555,6 +589,24 @@ SemanticSegmentationLayer::dynamicParametersCallback(
               buffer->setMinObstacleDistance(parameter.as_double());
             }
           }
+        } else if (name == name_ + "." + source + "." + "tile_map_decay_time") {
+          for (auto & buffer : segmentation_buffers_) {
+            if (buffer->getBufferSource() == source) {
+              buffer->setTileMapDecayTime(parameter.as_double());
+            }
+          }
+        } else if (name == name_ + "." + source + "." + "fov_decay_time") {
+          for (auto & buffer : segmentation_buffers_) {
+            if (buffer->getBufferSource() == source) {
+              buffer->setFovInsideDecayTime(parameter.as_double());
+            }
+          }
+        } else if (name == name_ + "." + source + "." + "outside_fov_decay_time") {
+          for (auto & buffer : segmentation_buffers_) {
+            if (buffer->getBufferSource() == source) {
+              buffer->setFovOutsideDecayTime(parameter.as_double());
+            }
+          }
         }
       } else if (type == rclcpp::ParameterType::PARAMETER_INTEGER) {
         for(auto & buffer : segmentation_buffers_) {
@@ -565,6 +617,16 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                 std::vector<std::string> class_names_for_type;
                 node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
                 for(auto & class_name : class_names_for_type){
+                  if (!buffer->hasClassName(class_name)) {
+                    // The class map is only filled once labelinfo arrives; without this the
+                    // lookup throws std::out_of_range and takes the costmap node down.
+                    RCLCPP_WARN(
+                      logger_,
+                      "Ignoring %s: class '%s' is not known yet, the labelinfo topic has not "
+                      "been received. Set it again once segmentation is running.",
+                      name.c_str(), class_name.c_str());
+                    continue;
+                  }
                   cost_params = buffer->getCostForClassName(class_name);
                   cost_params.base_cost = parameter.as_int();
                   buffer->updateClassMap(class_name, cost_params);
@@ -575,6 +637,16 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                 std::vector<std::string> class_names_for_type;
                 node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
                 for(auto & class_name : class_names_for_type){
+                  if (!buffer->hasClassName(class_name)) {
+                    // The class map is only filled once labelinfo arrives; without this the
+                    // lookup throws std::out_of_range and takes the costmap node down.
+                    RCLCPP_WARN(
+                      logger_,
+                      "Ignoring %s: class '%s' is not known yet, the labelinfo topic has not "
+                      "been received. Set it again once segmentation is running.",
+                      name.c_str(), class_name.c_str());
+                    continue;
+                  }
                   cost_params = buffer->getCostForClassName(class_name);
                   cost_params.max_cost = parameter.as_int();
                   buffer->updateClassMap(class_name, cost_params);
@@ -585,6 +657,16 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                 std::vector<std::string> class_names_for_type;
                 node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
                 for(auto & class_name : class_names_for_type){
+                  if (!buffer->hasClassName(class_name)) {
+                    // The class map is only filled once labelinfo arrives; without this the
+                    // lookup throws std::out_of_range and takes the costmap node down.
+                    RCLCPP_WARN(
+                      logger_,
+                      "Ignoring %s: class '%s' is not known yet, the labelinfo topic has not "
+                      "been received. Set it again once segmentation is running.",
+                      name.c_str(), class_name.c_str());
+                    continue;
+                  }
                   cost_params = buffer->getCostForClassName(class_name);
                   cost_params.mark_confidence = parameter.as_int();
                   buffer->updateClassMap(class_name, cost_params);
@@ -595,18 +677,18 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                 std::vector<std::string> class_names_for_type;
                 node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
                 for(auto & class_name : class_names_for_type){
+                  if (!buffer->hasClassName(class_name)) {
+                    // The class map is only filled once labelinfo arrives; without this the
+                    // lookup throws std::out_of_range and takes the costmap node down.
+                    RCLCPP_WARN(
+                      logger_,
+                      "Ignoring %s: class '%s' is not known yet, the labelinfo topic has not "
+                      "been received. Set it again once segmentation is running.",
+                      name.c_str(), class_name.c_str());
+                    continue;
+                  }
                   cost_params = buffer->getCostForClassName(class_name);
                   cost_params.samples_to_max_cost = parameter.as_int();
-                  buffer->updateClassMap(class_name, cost_params);
-                }
-              }
-              if (name == name_ + "." + source +  "." + class_type + ".dominant_priority") {
-                CostHeuristicParams cost_params;
-                std::vector<std::string> class_names_for_type;
-                node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
-                for(auto & class_name : class_names_for_type){
-                  cost_params = buffer->getCostForClassName(class_name);
-                  cost_params.dominant_priority = parameter.as_bool();
                   buffer->updateClassMap(class_name, cost_params);
                 }
               }

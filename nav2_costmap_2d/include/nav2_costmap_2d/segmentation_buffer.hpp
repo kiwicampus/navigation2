@@ -558,6 +558,26 @@ class SegmentationTileMap {
         float getDecayTime() const { return decay_time_; }
 
         /**
+         * @brief Set how long an observation lives, for new and for existing tiles
+         *
+         * Queues copy the decay time when they are created (see pushObservation), so the
+         * existing ones have to be updated too. Without that, a runtime change would only
+         * reach tiles observed from this point on and the map would hold two different
+         * decay times at once.
+         *
+         * @param decay_time New decay time in seconds
+         */
+        void setDecayTime(float decay_time)
+        {
+            std::lock_guard<std::recursive_mutex> guard(lock_);
+            decay_time_ = decay_time;
+            for (auto & tile : tile_map_)
+            {
+                tile.second.setDecayTime(decay_time);
+            }
+        }
+
+        /**
          * @brief Converts world coordinates to a TileIndex.
          * @param x X coordinate in world space.
          * @param y Y coordinate in world space.
@@ -802,6 +822,22 @@ public:
         return name_to_id_.empty() || id_to_cost_.empty();
     }
 
+    /**
+     * Whether a class name is known yet.
+     *
+     * The map is only populated once the labelinfo topic arrives, so getCostByName() throws
+     * std::out_of_range before that. Callers that react to runtime parameter changes have to
+     * check this first: a parameter can be set at any time, including before the first
+     * labelinfo message, and an uncaught throw there takes the whole costmap node down.
+     *
+     * @param name The class name.
+     * @return True if the class is known.
+     */
+    bool hasClassName(const std::string& name) const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return name_to_id_.find(name) != name_to_id_.end();
+    }
+
 private:
     mutable std::mutex mutex_;  // mutable allows locking in const methods
     std::unordered_map<std::string, uint8_t> name_to_id_;
@@ -913,6 +949,21 @@ class SegmentationBuffer
 
     void setMaxObstacleDistance(double distance) { sq_max_lookahead_distance_ = pow(distance, 2); }
 
+    /** @brief Set the decay time of the tile map, propagating it to the tiles already held */
+    void setTileMapDecayTime(double decay_time)
+    {
+        if (temporal_tile_map_)
+        {
+            temporal_tile_map_->setDecayTime(static_cast<float>(decay_time));
+        }
+    }
+
+    /** @brief Set the decay time for tiles inside the camera FOV; <= 0 falls back to the tile map's */
+    void setFovInsideDecayTime(double decay_time) { fov_inside_decay_time_ = decay_time; }
+
+    /** @brief Set the decay time for tiles that have left the camera FOV; <= 0 disables the split */
+    void setFovOutsideDecayTime(double decay_time) { fov_outside_decay_time_ = decay_time; }
+
     void updateClassMap(std::string new_class, CostHeuristicParams new_cost);
 
     SegmentationTileMap::SharedPtr getSegmentationTileMap()
@@ -928,6 +979,12 @@ class SegmentationBuffer
     CostHeuristicParams getCostForClassName(std::string class_name)
     {
         return segmentation_cost_multimap_->getCostByName(class_name);
+    }
+
+    /** @brief Whether the class is known yet; see SegmentationCostMultimap::hasClassName */
+    bool hasClassName(const std::string& class_name) const
+    {
+        return segmentation_cost_multimap_->hasClassName(class_name);
     }
 
    private:
