@@ -11,7 +11,7 @@ add_library(${library_name} SHARED
 target_include_directories(${library_name}
   PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>"
-  "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>")
+  "$<INSTALL_INTERFACE:include>")
 target_link_libraries(${library_name} PUBLIC
   bondcpp::bondcpp
   ${geometry_msgs_TARGETS}
@@ -33,7 +33,7 @@ target_link_libraries(${library_name} PRIVATE
   ${bond_TARGETS}
 )
 target_include_directories(${library_name} PUBLIC
-  "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+  "$<INSTALL_INTERFACE:include>"
 )
 
 # lifecycle_bringup/base_footprint_publisher fail to build on Humble (unrelated API gaps) and

@@ -30,7 +30,7 @@ set(library_name ${PROJECT_NAME}_core)
 add_subdirectory(src)
 
 install(DIRECTORY include/
-  DESTINATION include/${PROJECT_NAME}
+  DESTINATION include
 )
 
 if(BUILD_TESTING)
@@ -44,7 +44,7 @@ if(BUILD_TESTING)
   add_subdirectory(test)
 endif()
 
-ament_export_include_directories(include/${PROJECT_NAME})
+ament_export_include_directories(include)
 ament_export_libraries(${library_name})
 ament_export_dependencies(
   bondcpp
