@@ -33,6 +33,16 @@
 #include "nav2_ros_common/interface_factories.hpp"
 #include "nav2_ros_common/rate.hpp"
 
+namespace rclcpp
+{
+namespace node_interfaces
+{
+// Humble predates PostSetParametersCallbackHandle; aliased to the on-set handle type,
+// since nav2::LifecycleNode's compat add_post_set_parameters_callback (below) is built on it.
+using PostSetParametersCallbackHandle = OnSetParametersCallbackHandle;
+}  // namespace node_interfaces
+}  // namespace rclcpp
+
 namespace nav2
 {
 
@@ -290,6 +300,30 @@ public:
   {
     return nav2::interfaces::create_action_client<ActionT>(
       shared_from_this(), action_name, callback_group);
+  }
+
+  using PostSetParametersCallbackHandle = rclcpp::node_interfaces::PostSetParametersCallbackHandle;
+
+  // Humble's rclcpp predates post-set-parameter callbacks, which run after parameters are
+  // committed and cannot reject them; approximated here as an on-set callback that always
+  // accepts, so it fires once the (already-validated) values are effectively final.
+  PostSetParametersCallbackHandle::SharedPtr
+  add_post_set_parameters_callback(
+    std::function<void(const std::vector<rclcpp::Parameter> &)> callback)
+  {
+    return this->add_on_set_parameters_callback(
+      [callback](const std::vector<rclcpp::Parameter> & parameters) {
+        callback(parameters);
+        rcl_interfaces::msg::SetParametersResult result;
+        result.successful = true;
+        return result;
+      });
+  }
+
+  void remove_post_set_parameters_callback(
+    const rclcpp::node_interfaces::PostSetParametersCallbackHandle * handler)
+  {
+    this->remove_on_set_parameters_callback(handler);
   }
 
   /**

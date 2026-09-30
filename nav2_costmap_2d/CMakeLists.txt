@@ -55,6 +55,10 @@ target_include_directories(nav2_costmap_2d_core
   PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+    # Humble's tf2_sensor_msgs is header-only and predates the ament target-export
+    # convention (no tf2_sensor_msgs::tf2_sensor_msgs target); its plain include dir
+    # is added directly instead, since a fake IMPORTED target can't be re-exported.
+    ${tf2_sensor_msgs_INCLUDE_DIRS}
 )
 target_link_libraries(nav2_costmap_2d_core PUBLIC
   ${geometry_msgs_TARGETS}
@@ -67,7 +71,6 @@ target_link_libraries(nav2_costmap_2d_core PUBLIC
   ${std_srvs_TARGETS}
   tf2::tf2
   tf2_ros::tf2_ros
-  tf2_sensor_msgs::tf2_sensor_msgs
   nav2_ros_common::nav2_ros_common
 )
 

@@ -56,8 +56,12 @@ rclcpp::Clock::SharedPtr selectSteadyOrSimClock(NodeT node)
  * When use_sim_time is true, the rate is governed by the node's ROS clock
  * (simulation time). When use_sim_time is false, a steady (monotonic) clock
  * is used to avoid issues with system clock jumps (e.g. NTP corrections).
+ *
+ * Humble's rclcpp::GenericRate bakes its clock in as a compile-time template
+ * parameter and cannot take a runtime rclcpp::Clock; this reimplements the
+ * same sleep() logic directly against an rclcpp::Clock::SharedPtr instead.
  */
-class Rate : public rclcpp::Rate
+class Rate : public rclcpp::RateBase
 {
 public:
   /**
@@ -67,8 +71,44 @@ public:
    */
   template<typename NodeT>
   explicit Rate(NodeT node, double rate)
-  : rclcpp::Rate(rate, selectSteadyOrSimClock(node))
+  : clock_(selectSteadyOrSimClock(node)),
+    period_(rclcpp::Duration::from_seconds(1.0 / rate)),
+    last_interval_(clock_->now())
   {}
+
+  bool sleep() override
+  {
+    auto now = clock_->now();
+    auto next_interval = last_interval_ + period_;
+    if (now < last_interval_) {
+      next_interval = now + period_;
+    }
+    auto time_to_sleep = next_interval - now;
+    last_interval_ = last_interval_ + period_;
+    if (time_to_sleep.nanoseconds() <= 0) {
+      if (now > next_interval + period_) {
+        last_interval_ = now + period_;
+      }
+      return false;
+    }
+    rclcpp::sleep_for(std::chrono::nanoseconds(time_to_sleep.nanoseconds()));
+    return true;
+  }
+
+  bool is_steady() const override
+  {
+    return clock_->get_clock_type() == RCL_STEADY_TIME;
+  }
+
+  void reset() override
+  {
+    last_interval_ = clock_->now();
+  }
+
+private:
+  rclcpp::Clock::SharedPtr clock_;
+  rclcpp::Duration period_;
+  rclcpp::Time last_interval_;
 };
 
 }  // namespace nav2
