@@ -32,16 +32,22 @@
 #include "bond/msg/constants.hpp"
 #include "nav2_ros_common/interface_factories.hpp"
 #include "nav2_ros_common/rate.hpp"
+#include "rclcpp/version.h"
 
+// Humble's rclcpp (16.x) predates PostSetParametersCallbackHandle; this devcontainer's Jazzy
+// (28.x) already has a real, distinct one, so this shim must not shadow it (conflicting
+// declaration). 20 sits strictly between the two, which is all this gate needs.
+#if !RCLCPP_VERSION_GTE(20, 0, 0)
 namespace rclcpp
 {
 namespace node_interfaces
 {
-// Humble predates PostSetParametersCallbackHandle; aliased to the on-set handle type,
-// since nav2::LifecycleNode's compat add_post_set_parameters_callback (below) is built on it.
+// Aliased to the on-set handle type, since nav2::LifecycleNode's compat
+// add_post_set_parameters_callback (below) is built on it.
 using PostSetParametersCallbackHandle = OnSetParametersCallbackHandle;
 }  // namespace node_interfaces
 }  // namespace rclcpp
+#endif
 
 namespace nav2
 {
@@ -302,6 +308,7 @@ public:
       shared_from_this(), action_name, callback_group);
   }
 
+#if !RCLCPP_VERSION_GTE(20, 0, 0)
   using PostSetParametersCallbackHandle = rclcpp::node_interfaces::PostSetParametersCallbackHandle;
 
   // Humble's rclcpp predates post-set-parameter callbacks, which run after parameters are
@@ -325,6 +332,10 @@ public:
   {
     this->remove_on_set_parameters_callback(handler);
   }
+// Jazzy's rclcpp_lifecycle::LifecycleNode (this class's base) already provides real
+// add_post_set_parameters_callback/remove_post_set_parameters_callback natively; inherited
+// as-is, no shim needed.
+#endif
 
   /**
    * @brief Get a shared pointer of this
