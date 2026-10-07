@@ -24,6 +24,8 @@
 #include <vector>
 
 #include "nav2_msgs/srv/clear_entire_costmap.hpp"
+#include "nav2_msgs/srv/clear_costmap_around_robot.hpp"
+#include "nav2_msgs/srv/clear_costmap_except_region.hpp"
 #include "nav2_msgs/action/compute_path_to_pose.hpp"
 #include "nav2_msgs/action/follow_path.hpp"
 #include "nav2_msgs/action/spin.hpp"
@@ -96,6 +98,58 @@ protected:
   }
 };
 
+class DummyClearEntireCostmapService : public DummyService<nav2_msgs::srv::ClearEntireCostmap>
+{
+public:
+  explicit DummyClearEntireCostmapService(
+    const rclcpp::Node::SharedPtr & node,
+    std::string service_name)
+  : DummyService(node, service_name) {}
+
+protected:
+  void fillResponse(
+    const std::shared_ptr<nav2_msgs::srv::ClearEntireCostmap::Request>/*request*/,
+    const std::shared_ptr<nav2_msgs::srv::ClearEntireCostmap::Response> response) override
+  {
+    response->success = true;
+  }
+};
+
+class DummyClearCostmapAroundRobotService
+  : public DummyService<nav2_msgs::srv::ClearCostmapAroundRobot>
+{
+public:
+  explicit DummyClearCostmapAroundRobotService(
+    const rclcpp::Node::SharedPtr & node,
+    std::string service_name)
+  : DummyService(node, service_name) {}
+
+protected:
+  void fillResponse(
+    const std::shared_ptr<nav2_msgs::srv::ClearCostmapAroundRobot::Request>/*request*/,
+    const std::shared_ptr<nav2_msgs::srv::ClearCostmapAroundRobot::Response> response) override
+  {
+    response->success = true;
+  }
+};
+
+class DummyClearCostmapExceptRegionService
+  : public DummyService<nav2_msgs::srv::ClearCostmapExceptRegion>
+{
+public:
+  explicit DummyClearCostmapExceptRegionService(
+    const rclcpp::Node::SharedPtr & node,
+    std::string service_name)
+  : DummyService(node, service_name) {}
+
+protected:
+  void fillResponse(
+    const std::shared_ptr<nav2_msgs::srv::ClearCostmapExceptRegion::Request>/*request*/,
+    const std::shared_ptr<nav2_msgs::srv::ClearCostmapExceptRegion::Response> response) override
+  {
+    response->success = true;
+  }
+};
 
 class ServerHandler
 {
@@ -115,8 +169,10 @@ public:
   void reset() const;
 
 public:
-  std::unique_ptr<DummyService<nav2_msgs::srv::ClearEntireCostmap>> clear_local_costmap_server;
-  std::unique_ptr<DummyService<nav2_msgs::srv::ClearEntireCostmap>> clear_global_costmap_server;
+  std::unique_ptr<DummyClearEntireCostmapService> clear_local_costmap_server;
+  std::unique_ptr<DummyClearEntireCostmapService> clear_global_costmap_server;
+  std::unique_ptr<DummyClearCostmapAroundRobotService> clear_costmap_around_robot_server;
+  std::unique_ptr<DummyClearCostmapExceptRegionService> clear_costmap_except_region_server;
   std::unique_ptr<DummyComputePathToPoseActionServer> compute_path_to_pose_server;
   std::unique_ptr<DummyFollowPathActionServer> follow_path_server;
   std::unique_ptr<DummyActionServer<nav2_msgs::action::Spin>> spin_server;
