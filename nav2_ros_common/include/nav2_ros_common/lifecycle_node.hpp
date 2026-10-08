@@ -15,6 +15,7 @@
 #ifndef NAV2_ROS_COMMON__LIFECYCLE_NODE_HPP_
 #define NAV2_ROS_COMMON__LIFECYCLE_NODE_HPP_
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <thread>
@@ -112,11 +113,14 @@ public:
 
     runCleanups();
 
-    if (rcl_preshutdown_cb_handle_) {
+    // Inside the context's preshutdown pass the context holds its callback mutex, so removing
+    // would deadlock; disarming the callback is enough there.
+    rcl_preshutdown_cb_alive_->store(false);
+    if (rcl_preshutdown_cb_handle_ && !inRclPreshutdown()) {
       rclcpp::Context::SharedPtr context = get_node_base_interface()->get_context();
       context->remove_pre_shutdown_callback(*(rcl_preshutdown_cb_handle_.get()));
-      rcl_preshutdown_cb_handle_.reset();
     }
+    rcl_preshutdown_cb_handle_.reset();
   }
 
   /**
@@ -464,10 +468,28 @@ protected:
   {
     rclcpp::Context::SharedPtr context = get_node_base_interface()->get_context();
 
+    auto alive = rcl_preshutdown_cb_alive_;
     rcl_preshutdown_cb_handle_ = std::make_unique<rclcpp::PreShutdownCallbackHandle>(
       context->add_pre_shutdown_callback(
-        std::bind(&LifecycleNode::on_rcl_preshutdown, this))
+        [this, alive]() {
+          if (!alive->load()) {
+            return;
+          }
+          const bool outer = inRclPreshutdown();
+          inRclPreshutdown() = true;
+          on_rcl_preshutdown();
+          inRclPreshutdown() = outer;
+        })
     );
+  }
+
+  /**
+   * @brief True while this thread runs the context's preshutdown callbacks
+   */
+  static bool & inRclPreshutdown()
+  {
+    thread_local bool in_preshutdown = false;
+    return in_preshutdown;
   }
 
   /**
@@ -495,6 +517,8 @@ protected:
 
   // Connection to tell that server is still up
   std::unique_ptr<rclcpp::PreShutdownCallbackHandle> rcl_preshutdown_cb_handle_{nullptr};
+  std::shared_ptr<std::atomic<bool>> rcl_preshutdown_cb_alive_{
+    std::make_shared<std::atomic<bool>>(true)};
   std::shared_ptr<bond::Bond> bond_{nullptr};
   double bond_heartbeat_period{0.1};
   rclcpp::TimerBase::SharedPtr autostart_timer_;
