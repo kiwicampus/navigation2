@@ -122,7 +122,7 @@ target_link_libraries(${library_name} PUBLIC
 )
 target_link_libraries(${library_name} PRIVATE
   pluginlib::pluginlib
-  yaml-cpp::yaml-cpp
+  yaml-cpp
 )
 
 pluginlib_export_plugin_description_file(rviz_common plugins_description.xml)

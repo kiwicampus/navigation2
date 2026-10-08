@@ -64,7 +64,7 @@ target_link_libraries(${map_io_library_name} PUBLIC
 target_link_libraries(${map_io_library_name} PRIVATE
   ${GRAPHICSMAGICKCPP_LIBRARIES}
   tf2::tf2
-  yaml-cpp::yaml-cpp
+  yaml-cpp
   Eigen3::Eigen
 )
 
@@ -88,7 +88,7 @@ target_link_libraries(${library_name} PUBLIC
 target_link_libraries(${library_name} PRIVATE
   ${lifecycle_msgs_TARGETS}
   rclcpp_components::component
-  yaml-cpp::yaml-cpp
+  yaml-cpp
 )
 
 add_library(${vo_library_name} SHARED
@@ -113,7 +113,7 @@ target_link_libraries(${vo_library_name} PUBLIC
 target_link_libraries(${library_name} PRIVATE
   ${lifecycle_msgs_TARGETS}
   rclcpp_components::component
-  yaml-cpp::yaml-cpp
+  yaml-cpp
 )
 
 add_executable(${map_server_executable}
