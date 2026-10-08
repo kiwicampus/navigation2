@@ -51,6 +51,10 @@ macro(nav2_package)
   endforeach()
   unset(_nav2_vars)
   unset(_nav2_var)
+  # The package's own headers go first of all, so its apt copy never shadows them.
+  if(EXISTS "${PROJECT_SOURCE_DIR}/include")
+    include_directories(BEFORE "${PROJECT_SOURCE_DIR}/include")
+  endif()
 
   option(COVERAGE_ENABLED "Enable code coverage" FALSE)
   if(COVERAGE_ENABLED)
