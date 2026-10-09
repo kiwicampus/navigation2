@@ -25,6 +25,8 @@ install(
 if(BUILD_TESTING)
   find_package(ament_cmake_test REQUIRED)
   find_package(ament_cmake_pytest REQUIRED)
+  # Consumers get nav2_add_pytest_test through the extras file; this package defines it here.
+  include(cmake/nav2_package.cmake)
 
   nav2_add_pytest_test(test_rewritten_yaml test/test_rewritten_yaml.py
   )
