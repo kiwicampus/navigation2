@@ -869,6 +869,55 @@ TEST_F(Tester, testCircleGetPointsInside)
   ASSERT_EQ(circle_->getPointsInside(points), 1);
 }
 
+TEST_F(Tester, testApproachParametersAreDynamic)
+{
+  createPolygon("approach", false);
+
+  test_node_->publishFootprint();
+  std::vector<nav2_collision_monitor::Point> footprint;
+  ASSERT_TRUE(waitFootprint(500ms, footprint));
+
+  // 0.5 m/s over the default 1.0 s horizon sweeps 0.5 m past the 0.5 m footprint.
+  // These points sit 0.6 m past it, so they are out of reach to begin with.
+  nav2_collision_monitor::Velocity vel{0.5, 0.0, 0.0};
+  std::unordered_map<std::string, std::vector<nav2_collision_monitor::Point>> points_map;
+  points_map.insert({OBSERVATION_SOURCE_NAME, {{1.1, -0.01}, {1.1, 0.01}}});
+  EXPECT_DOUBLE_EQ(polygon_->getCollisionTime(points_map, vel), -1.0);
+
+  // Double the horizon while the polygon stays configured and active: no
+  // re-configure, no restart.
+  auto result = test_node_->set_parameter(
+    rclcpp::Parameter(POLYGON_NAME + std::string(".time_before_collision"), 2.0));
+  ASSERT_TRUE(result.successful);
+  EXPECT_NEAR(polygon_->getTimeBeforeCollision(), 2.0, EPSILON);
+
+  // The same points are now reached, at 0.6 m / 0.5 m/s.
+  EXPECT_NEAR(polygon_->getCollisionTime(points_map, vel), 1.2, SIMULATION_TIME_STEP);
+
+  // simulation_time_step is dynamic too.
+  result = test_node_->set_parameter(
+    rclcpp::Parameter(POLYGON_NAME + std::string(".simulation_time_step"), 0.02));
+  ASSERT_TRUE(result.successful);
+  EXPECT_NEAR(polygon_->getSimulationTimeStep(), 0.02, EPSILON);
+}
+
+TEST_F(Tester, testApproachParametersRejectNonPositive)
+{
+  createPolygon("approach", false);
+
+  // CollisionMonitor divides by the horizon, and a zero step would never advance
+  // the simulation loop. Both have to be refused, leaving the old value in place.
+  auto result = test_node_->set_parameter(
+    rclcpp::Parameter(POLYGON_NAME + std::string(".time_before_collision"), 0.0));
+  EXPECT_FALSE(result.successful);
+  EXPECT_NEAR(polygon_->getTimeBeforeCollision(), TIME_BEFORE_COLLISION, EPSILON);
+
+  result = test_node_->set_parameter(
+    rclcpp::Parameter(POLYGON_NAME + std::string(".simulation_time_step"), -0.1));
+  EXPECT_FALSE(result.successful);
+  EXPECT_NEAR(polygon_->getSimulationTimeStep(), SIMULATION_TIME_STEP, EPSILON);
+}
+
 TEST_F(Tester, testPolygonGetCollisionTime)
 {
   createPolygon("approach", false);
