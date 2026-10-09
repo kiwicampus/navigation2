@@ -581,6 +581,32 @@ Polygon::dynamicParametersCallback(
         enabled_ = parameter.as_bool();
       }
     }
+
+    if (param_type == rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE) {
+      // Both are declared only for APPROACH polygons, so leave the others alone.
+      if (action_type_ != APPROACH) {
+        continue;
+      }
+      if (param_name == polygon_name_ + "." + "time_before_collision") {
+        const double value = parameter.as_double();
+        if (value <= 0.0) {
+          // CollisionMonitor divides the collision time by this value.
+          result.successful = false;
+          result.reason = polygon_name_ + ".time_before_collision must be > 0";
+          return result;
+        }
+        time_before_collision_ = value;
+      } else if (param_name == polygon_name_ + "." + "simulation_time_step") {
+        const double value = parameter.as_double();
+        if (value <= 0.0) {
+          // A non-positive step would make the simulation loop never advance.
+          result.successful = false;
+          result.reason = polygon_name_ + ".simulation_time_step must be > 0";
+          return result;
+        }
+        simulation_time_step_ = value;
+      }
+    }
   }
   result.successful = true;
   return result;
