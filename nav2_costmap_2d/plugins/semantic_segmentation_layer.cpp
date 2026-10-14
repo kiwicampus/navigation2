@@ -77,10 +77,12 @@ void SemanticSegmentationLayer::onInitialize()
   declareParameter("observation_sources", rclcpp::ParameterValue(std::string("")));
   declareParameter("publish_debug_topics", rclcpp::ParameterValue(false));
   declareParameter("use_approximate_time_sync", rclcpp::ParameterValue(true));
+  declareParameter("clear_tile_maps_on_reset", rclcpp::ParameterValue(false));
 
   node->get_parameter(name_ + "." + "enabled", enabled_);
   node->get_parameter(name_ + "." + "combination_method", combination_method_);
   node->get_parameter(name_ + "." + "use_approximate_time_sync", use_approximate_time_sync_);
+  node->get_parameter(name_ + "." + "clear_tile_maps_on_reset", clear_tile_maps_on_reset_);
   node->get_parameter("track_unknown_space", track_unknown_space);
   node->get_parameter("transform_tolerance", transform_tolerance);  
 
@@ -504,12 +506,15 @@ void SemanticSegmentationLayer::syncSegmConfPointcloudCb(const std::shared_ptr<c
 
 void SemanticSegmentationLayer::reset()
 {
+  std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
   resetMaps();
-  // Live tiles repaint the costmap on every update, so a reset that kept them would last one cycle
-  for (auto & buffer : segmentation_buffers_) {
-    buffer->lock();
-    buffer->getSegmentationTileMap()->clear();
-    buffer->unlock();
+  // Live tiles repaint the costmap on every update, so a reset that keeps them lasts one cycle
+  if (clear_tile_maps_on_reset_) {
+    for (auto & buffer : segmentation_buffers_) {
+      buffer->lock();
+      buffer->getSegmentationTileMap()->clear();
+      buffer->unlock();
+    }
   }
   current_ = false;
   was_reset_ = true;
@@ -542,6 +547,8 @@ SemanticSegmentationLayer::dynamicParametersCallback(
     if (type == rclcpp::ParameterType::PARAMETER_BOOL) {
       if (name == name_ + "." + "enabled") {
         enabled_ = parameter.as_bool();
+      } else if (name == name_ + "." + "clear_tile_maps_on_reset") {
+        clear_tile_maps_on_reset_ = parameter.as_bool();
       } else {
         // dominant_priority is declared as a bool, so it arrives here. Its handler used to sit
         // in the PARAMETER_INTEGER branch below, which a bool never reaches: setting it did

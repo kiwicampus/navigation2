@@ -182,6 +182,7 @@ class SemanticSegmentationLayer : public CostmapLayer
     bool rolling_window_;
     bool was_reset_;
     bool use_approximate_time_sync_;
+    bool clear_tile_maps_on_reset_;
     int combination_method_;
     rclcpp::Clock::SharedPtr clock_;
 };
