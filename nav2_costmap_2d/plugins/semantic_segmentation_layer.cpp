@@ -505,6 +505,12 @@ void SemanticSegmentationLayer::syncSegmConfPointcloudCb(const std::shared_ptr<c
 void SemanticSegmentationLayer::reset()
 {
   resetMaps();
+  // Live tiles repaint the costmap on every update, so a reset that kept them would last one cycle
+  for (auto & buffer : segmentation_buffers_) {
+    buffer->lock();
+    buffer->getSegmentationTileMap()->clear();
+    buffer->unlock();
+  }
   current_ = false;
   was_reset_ = true;
 }

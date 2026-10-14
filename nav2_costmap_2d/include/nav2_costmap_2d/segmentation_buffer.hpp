@@ -558,6 +558,15 @@ class SegmentationTileMap {
         float getDecayTime() const { return decay_time_; }
 
         /**
+         * @brief Removes every tile and its observations
+         */
+        void clear()
+        {
+            std::lock_guard<std::recursive_mutex> guard(lock_);
+            tile_map_.clear();
+        }
+
+        /**
          * @brief Set how long an observation lives, for new and for existing tiles
          *
          * Queues copy the decay time when they are created (see pushObservation), so the
