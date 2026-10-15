@@ -52,6 +52,14 @@ void Optimizer::initialize(
   critic_manager_.on_configure(parent_, name_, costmap_ros_, parameters_handler_);
   noise_generator_.initialize(settings_, isHolonomic(), name_, parameters_handler_);
 
+  // Kiwi: monitoring topics, see publishSamplingMonitoring()
+  wz_std_pub_ = node->create_publisher<std_msgs::msg::Float32>(
+    "/navigation/mppi/wz_std", rclcpp::QoS(1).best_effort());
+  wz_std_pub_->on_activate();
+  current_speed_pub_ = node->create_publisher<std_msgs::msg::Float32>(
+    "/navigation/mppi/current_speed", rclcpp::QoS(1).best_effort());
+  current_speed_pub_->on_activate();
+
   // This may throw an exception if not valid and fail initialization
   nav2::declare_parameter_if_not_declared(
     node, name_ + ".TrajectoryValidator.plugin",
@@ -388,7 +396,25 @@ std::tuple<geometry_msgs::msg::TwistStamped, Eigen::ArrayXXf> Optimizer::evalCon
     shiftControlSequence();
   }
 
+  publishSamplingMonitoring();
+
   return std::make_tuple(control, optimal_trajectory);
+}
+
+void Optimizer::publishSamplingMonitoring()
+{
+  // Same speed the wz_std decay is driven by in NoiseGenerator::computeAdaptiveStds()
+  const float vx = std::fabs(static_cast<float>(state_.speed.linear.x));
+  const float vy = std::fabs(static_cast<float>(state_.speed.linear.y));
+  const float wz_std_adaptive = noise_generator_.getWzStdAdaptive();
+
+  auto wz_std_msg = std::make_unique<std_msgs::msg::Float32>();
+  wz_std_msg->data = wz_std_adaptive > 0.0f ? wz_std_adaptive : settings_.sampling_std.wz;
+  wz_std_pub_->publish(std::move(wz_std_msg));
+
+  auto current_speed_msg = std::make_unique<std_msgs::msg::Float32>();
+  current_speed_msg->data = isHolonomic() ? hypotf(vx, vy) : vx;
+  current_speed_pub_->publish(std::move(current_speed_msg));
 }
 
 void Optimizer::optimize()
