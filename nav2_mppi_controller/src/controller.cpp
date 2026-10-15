@@ -131,6 +131,10 @@ geometry_msgs::msg::TwistStamped MPPIController::computeVelocityCommands(
 
   if (visualize_) {
     visualize(cmd.header.stamp, optimal_trajectory);
+  } else {
+    // Always publish the optimal path (remapped to local_plan) regardless of visualize
+    trajectory_visualizer_.add(optimal_trajectory, "Optimal Trajectory", cmd.header.stamp);
+    trajectory_visualizer_.visualize();
   }
 
   return cmd;
