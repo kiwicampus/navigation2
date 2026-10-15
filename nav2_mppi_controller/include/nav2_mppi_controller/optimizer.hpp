@@ -36,6 +36,7 @@
 #include "geometry_msgs/msg/pose_stamped.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "nav_msgs/msg/path.hpp"
+#include "std_msgs/msg/float32.hpp"
 #include "nav2_util/geometry_utils.hpp"
 
 #include "nav2_mppi_controller/models/optimizer_settings.hpp"
@@ -295,6 +296,11 @@ protected:
    */
   bool fallback(bool fail);
 
+  /**
+   * @brief Kiwi: publish the effective wz sampling deviation and the speed driving its decay
+   */
+  void publishSamplingMonitoring();
+
 protected:
   nav2::LifecycleNode::WeakPtr parent_;
   std::shared_ptr<nav2_costmap_2d::Costmap2DROS> costmap_ros_;
@@ -308,6 +314,10 @@ protected:
   ParametersHandler * parameters_handler_;
   CriticManager critic_manager_;
   NoiseGenerator noise_generator_;
+
+  // Kiwi: monitoring topics, see publishSamplingMonitoring()
+  nav2::Publisher<std_msgs::msg::Float32>::SharedPtr wz_std_pub_;
+  nav2::Publisher<std_msgs::msg::Float32>::SharedPtr current_speed_pub_;
 
   std::unique_ptr<pluginlib::ClassLoader<MotionModel>> motion_model_loader_;
   std::unique_ptr<pluginlib::ClassLoader<OptimalTrajectoryValidator>> validator_loader_;
