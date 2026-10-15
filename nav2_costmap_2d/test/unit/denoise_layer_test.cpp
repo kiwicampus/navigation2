@@ -488,6 +488,45 @@ TEST_F(DenoiseLayerTester, initializeDefault) {
     std::make_tuple(true, ConnectivityType::Way8, 2));
 }
 
+TEST_F(DenoiseLayerTester, dynamicParametersAfterInitialize) {
+  auto node = std::make_shared<nav2_util::LifecycleNode>("test_node");
+  auto layer = constructLayer(node);
+
+  DenoiseLayerTester::initialize(*layer);
+  ASSERT_EQ(
+    DenoiseLayerTester::getParameters(*layer),
+    std::make_tuple(true, ConnectivityType::Way8, 2));
+
+  // Set once the layer is already initialized: the values have to follow without
+  // another onInitialize().
+  node->set_parameter(
+    rclcpp::Parameter(layer->getFullName("minimal_group_size"), rclcpp::ParameterValue(5)));
+  node->set_parameter(
+    rclcpp::Parameter(layer->getFullName("group_connectivity_type"), rclcpp::ParameterValue(4)));
+
+  ASSERT_EQ(
+    DenoiseLayerTester::getParameters(*layer),
+    std::make_tuple(true, ConnectivityType::Way4, 5));
+}
+
+TEST_F(DenoiseLayerTester, dynamicParametersOutOfRange) {
+  auto node = std::make_shared<nav2_util::LifecycleNode>("test_node");
+  auto layer = constructLayer(node);
+
+  DenoiseLayerTester::initialize(*layer);
+
+  // Same normalization onInitialize() applies: a group size below 2 leaves every
+  // cell alone, and any connectivity other than 4 falls back to 8.
+  node->set_parameter(
+    rclcpp::Parameter(layer->getFullName("minimal_group_size"), rclcpp::ParameterValue(0)));
+  node->set_parameter(
+    rclcpp::Parameter(layer->getFullName("group_connectivity_type"), rclcpp::ParameterValue(7)));
+
+  ASSERT_EQ(
+    DenoiseLayerTester::getParameters(*layer),
+    std::make_tuple(true, ConnectivityType::Way8, 1));
+}
+
 TEST_F(DenoiseLayerTester, initializeCustom) {
   auto node = std::make_shared<nav2_util::LifecycleNode>("test_node");
   auto layer = constructLayer(node);

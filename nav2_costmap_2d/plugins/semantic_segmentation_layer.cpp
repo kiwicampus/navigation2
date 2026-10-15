@@ -78,11 +78,13 @@ void SemanticSegmentationLayer::onInitialize()
   declareParameter("publish_debug_topics", rclcpp::ParameterValue(false));
   declareParameter("use_approximate_time_sync", rclcpp::ParameterValue(true));
   declareParameter("clear_tile_maps_on_reset", rclcpp::ParameterValue(false));
+  declareParameter("clear_decayed_tiles", rclcpp::ParameterValue(false));
 
   node->get_parameter(name_ + "." + "enabled", enabled_);
   node->get_parameter(name_ + "." + "combination_method", combination_method_);
   node->get_parameter(name_ + "." + "use_approximate_time_sync", use_approximate_time_sync_);
   node->get_parameter(name_ + "." + "clear_tile_maps_on_reset", clear_tile_maps_on_reset_);
+  node->get_parameter(name_ + "." + "clear_decayed_tiles", clear_decayed_tiles_);
   node->get_parameter("track_unknown_space", track_unknown_space);
   node->get_parameter("transform_tolerance", transform_tolerance);  
 
@@ -296,6 +298,7 @@ void SemanticSegmentationLayer::onInitialize()
       }
     }
   }
+  updateRemovedTileTracking();
 
   dyn_params_handler_ = node->add_on_set_parameters_callback(
     std::bind(
@@ -338,6 +341,17 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
     return;
   }
 
+  // Repaint from live tiles only, as STVL does: purged tiles leave their cell at the default value and
+  // are touched so the master grid drops them as well
+  if (clear_decayed_tiles_) {
+    resetMaps();
+    if (touch_whole_layer_) {
+      touch(getOriginX(), getOriginY(), min_x, min_y, max_x, max_y);
+      touch(getOriginX() + getSizeInMetersX(), getOriginY() + getSizeInMetersY(), min_x, min_y, max_x, max_y);
+      touch_whole_layer_ = false;
+    }
+  }
+
   // Process each tile map one at a time
   for (auto& tile_map_pair : segmentation_tile_maps)
   {
@@ -346,6 +360,10 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
     
     // Purge old observations in updateBounds before computing costs to ensure the costmap accurately reflects the current state after decay, maintaining consistency between the buffer and the costmap.
     tile_map_pair.first->purgeOldObservations(current_time);
+    for (const auto & removed : tile_map_pair.first->takeRemovedTiles()) {
+      const TileWorldXY world = tile_map_pair.first->indexToWorld(removed.x, removed.y);
+      touch(world.x, world.y, min_x, min_y, max_x, max_y);
+    }
         
     for(auto& tile: *tile_map_pair.first)
     {
@@ -504,6 +522,18 @@ void SemanticSegmentationLayer::syncSegmConfPointcloudCb(const std::shared_ptr<c
     buffer->unlock();
 }
 
+void SemanticSegmentationLayer::updateRemovedTileTracking()
+{
+  const bool track = enabled_ && clear_decayed_tiles_;
+  // Cells painted while untracked can only leave the master grid through one full touch
+  touch_whole_layer_ = track;
+  for (auto & buffer : segmentation_buffers_) {
+    buffer->lock();
+    buffer->getSegmentationTileMap()->setTrackRemovedTiles(track);
+    buffer->unlock();
+  }
+}
+
 void SemanticSegmentationLayer::reset()
 {
   std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
@@ -547,8 +577,12 @@ SemanticSegmentationLayer::dynamicParametersCallback(
     if (type == rclcpp::ParameterType::PARAMETER_BOOL) {
       if (name == name_ + "." + "enabled") {
         enabled_ = parameter.as_bool();
+        updateRemovedTileTracking();
       } else if (name == name_ + "." + "clear_tile_maps_on_reset") {
         clear_tile_maps_on_reset_ = parameter.as_bool();
+      } else if (name == name_ + "." + "clear_decayed_tiles") {
+        clear_decayed_tiles_ = parameter.as_bool();
+        updateRemovedTileTracking();
       } else {
         // dominant_priority is declared as a bool, so it arrives here. Its handler used to sit
         // in the PARAMETER_INTEGER branch below, which a bool never reaches: setting it did

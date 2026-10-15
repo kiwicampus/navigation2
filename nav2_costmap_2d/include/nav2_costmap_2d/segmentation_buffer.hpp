@@ -514,6 +514,8 @@ class SegmentationTileMap {
         float resolution_;
         float decay_time_;
         std::recursive_mutex lock_;
+        bool track_removed_tiles_ = false;
+        std::vector<TileIndex> removed_tiles_;
 
 
     public:
@@ -564,6 +566,26 @@ class SegmentationTileMap {
         {
             std::lock_guard<std::recursive_mutex> guard(lock_);
             tile_map_.clear();
+            removed_tiles_.clear();
+        }
+
+        /**
+         * @brief Whether purged tiles are kept for takeRemovedTiles(); off by default so they never pile up
+         */
+        void setTrackRemovedTiles(bool track)
+        {
+            std::lock_guard<std::recursive_mutex> guard(lock_);
+            track_removed_tiles_ = track;
+            removed_tiles_.clear();
+        }
+
+        /**
+         * @brief Returns the tiles purged since the last call
+         */
+        std::vector<TileIndex> takeRemovedTiles()
+        {
+            std::lock_guard<std::recursive_mutex> guard(lock_);
+            return std::exchange(removed_tiles_, {});
         }
 
         /**
@@ -653,6 +675,10 @@ class SegmentationTileMap {
             for (auto& tile : tiles_to_remove)
             {
                 tile_map_.erase(tile);
+            }
+            if (track_removed_tiles_)
+            {
+                removed_tiles_.insert(removed_tiles_.end(), tiles_to_remove.begin(), tiles_to_remove.end());
             }
         }
 };

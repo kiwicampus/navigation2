@@ -21,6 +21,8 @@
 
 #include "rclcpp/rclcpp.hpp"
 
+using rcl_interfaces::msg::ParameterType;
+
 namespace nav2_costmap_2d
 {
 
@@ -77,7 +79,21 @@ DenoiseLayer::onInitialize()
     }
   }
 
+  dyn_params_handler_ = node->add_on_set_parameters_callback(
+    std::bind(
+      &DenoiseLayer::dynamicParametersCallback,
+      this, std::placeholders::_1));
+
   current_ = true;
+}
+
+DenoiseLayer::~DenoiseLayer()
+{
+  auto node = node_.lock();
+  if (dyn_params_handler_ && node) {
+    node->remove_on_set_parameters_callback(dyn_params_handler_.get());
+  }
+  dyn_params_handler_.reset();
 }
 
 void
@@ -201,6 +217,62 @@ bool DenoiseLayer::isBackground(uint8_t pixel) const
     pixel == INSCRIBED_INFLATED_OBSTACLE ||
     (pixel == NO_INFORMATION && no_information_is_obstacle_);
   return !is_obstacle;
+}
+
+rcl_interfaces::msg::SetParametersResult
+DenoiseLayer::dynamicParametersCallback(
+  std::vector<rclcpp::Parameter> parameters)
+{
+  // No lock here: DenoiseLayer derives from Layer, not CostmapLayer, so it has no
+  // costmap of its own to guard, and the parameters below are plain scalars.
+  rcl_interfaces::msg::SetParametersResult result;
+
+  for (auto parameter : parameters) {
+    const auto & param_type = parameter.get_type();
+    const auto & param_name = parameter.get_name();
+
+    if (param_type == ParameterType::PARAMETER_BOOL) {
+      if (param_name == name_ + "." + "enabled") {
+        enabled_ = parameter.as_bool();
+      }
+    } else if (param_type == ParameterType::PARAMETER_INTEGER) {
+      if (param_name == name_ + "." + "minimal_group_size") {
+        const int minimal_group_size_param = parameter.as_int();
+
+        if (minimal_group_size_param <= 1) {
+          RCLCPP_WARN(
+            logger_,
+            "DenoiseLayer::dynamicParametersCallback(): param minimal_group_size: %i."
+            " A value of 1 or less means that all map cells will be left as they are.",
+            minimal_group_size_param);
+          minimal_group_size_ = 1;
+        } else {
+          minimal_group_size_ = static_cast<size_t>(minimal_group_size_param);
+        }
+      } else if (param_name == name_ + "." + "group_connectivity_type") {
+        const int group_connectivity_type_param = parameter.as_int();
+
+        if (group_connectivity_type_param == 4) {
+          group_connectivity_type_ = ConnectivityType::Way4;
+        } else {
+          group_connectivity_type_ = ConnectivityType::Way8;
+
+          if (group_connectivity_type_param != 8) {
+            RCLCPP_WARN(
+              logger_,
+              "DenoiseLayer::dynamicParametersCallback(): param group_connectivity_type: %i."
+              " Possible values are  4 (neighbors pixels are connected horizontally and vertically) "
+              "or 8 (neighbors pixels are connected horizontally, vertically and diagonally)."
+              "The default value 8 will be used",
+              group_connectivity_type_param);
+          }
+        }
+      }
+    }
+  }
+
+  result.successful = true;
+  return result;
 }
 
 }  // namespace nav2_costmap_2d

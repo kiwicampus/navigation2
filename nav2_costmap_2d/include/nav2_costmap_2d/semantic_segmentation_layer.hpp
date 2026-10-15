@@ -129,6 +129,11 @@ class SemanticSegmentationLayer : public CostmapLayer
     rcl_interfaces::msg::SetParametersResult dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
 
    private:
+    /**
+     * @brief Purged tiles are only tracked while the layer paints with clear_decayed_tiles, so they never pile up
+     */
+    void updateRemovedTileTracking();
+
     void syncSegmPointcloudCb(const std::shared_ptr<const sensor_msgs::msg::Image>& segmentation,
                               const std::shared_ptr<const sensor_msgs::msg::PointCloud2>& pointcloud,
                               const std::shared_ptr<nav2_costmap_2d::SegmentationBuffer>& buffer);
@@ -183,6 +188,8 @@ class SemanticSegmentationLayer : public CostmapLayer
     bool was_reset_;
     bool use_approximate_time_sync_;
     bool clear_tile_maps_on_reset_;
+    bool clear_decayed_tiles_;
+    bool touch_whole_layer_ = false;
     int combination_method_;
     rclcpp::Clock::SharedPtr clock_;
 };

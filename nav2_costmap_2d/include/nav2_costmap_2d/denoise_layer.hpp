@@ -15,6 +15,8 @@
 #ifndef NAV2_COSTMAP_2D__DENOISE_LAYER_HPP_
 #define NAV2_COSTMAP_2D__DENOISE_LAYER_HPP_
 
+#include <vector>
+
 #include "nav2_costmap_2d/layer.hpp"
 #include "nav2_costmap_2d/denoise/image_processing.hpp"
 
@@ -31,7 +33,7 @@ class DenoiseLayer : public Layer
 
 public:
   DenoiseLayer() = default;
-  ~DenoiseLayer() = default;
+  ~DenoiseLayer();
 
   /**
    * @brief Reset this layer
@@ -114,6 +116,15 @@ private:
   bool isBackground(uint8_t pixel) const;
 
 private:
+  /**
+   * @brief Callback executed when a parameter change is detected
+   * @param parameters list of changed parameters
+   */
+  rcl_interfaces::msg::SetParametersResult
+  dynamicParametersCallback(std::vector<rclcpp::Parameter> parameters);
+
+  // Dynamic parameters handler
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr dyn_params_handler_;
   // The border value of group size. Groups of this and larger size will be kept
   size_t minimal_group_size_{};
   // Pixels connectivity type. Determines how pixels belonging to the same group can be arranged
