@@ -22,6 +22,7 @@
 
 #include "rclcpp/rclcpp.hpp"
 #include "geometry_msgs/msg/polygon_stamped.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 
 #include "tf2/time.h"
 #include "tf2_ros/buffer.h"
@@ -301,11 +302,24 @@ protected:
 
   // Visualization
   /// @brief Whether to publish the polygon
+  /**
+   * @brief Publishes the area the approach simulation swept on the last cycle
+   */
+  void publishSweep();
+
   bool visualize_;
+  /// @brief Whether to publish the area the approach action actually sweeps
+  bool visualize_sweep_;
   /// @brief Polygon, used for: 1. visualization; 2. storing latest dynamic polygon message
   geometry_msgs::msg::PolygonStamped polygon_;
   /// @brief Polygon publisher for visualization purposes
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PolygonStamped>::SharedPtr polygon_pub_;
+  /// @brief Publisher of the swept area, one marker per simulation step
+  rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::MarkerArray>::SharedPtr sweep_pub_;
+  /// @brief Robot poses the last getCollisionTime() projected through.
+  /// Mutable because that method is const and is where the poses already exist:
+  /// recomputing them for the visualisation would let the two drift apart.
+  mutable std::vector<Pose> sweep_poses_;
 
   /// @brief Polygon points (vertices) in a base_frame_id_
   std::vector<Point> poly_;

@@ -39,7 +39,8 @@ Polygon::Polygon(
 : node_(node), polygon_name_(polygon_name), action_type_(DO_NOTHING),
   slowdown_ratio_(0.0), linear_limit_(0.0), angular_limit_(0.0),
   footprint_sub_(nullptr), tf_buffer_(tf_buffer),
-  base_frame_id_(base_frame_id), transform_tolerance_(transform_tolerance)
+  base_frame_id_(base_frame_id), transform_tolerance_(transform_tolerance),
+  visualize_sweep_(false)
 {
   RCLCPP_INFO(logger_, "[%s]: Creating Polygon", polygon_name_.c_str());
 }
@@ -96,6 +97,15 @@ bool Polygon::configure()
       polygon_pub_topic, polygon_qos);
   }
 
+  if (visualize_sweep_) {
+    // The published outline is the shape at rest; this is the ground it covers
+    // once projected along the commanded velocity, which is what actually
+    // triggers and grows with speed.
+    rclcpp::QoS sweep_qos = rclcpp::QoS(rclcpp::KeepLast(1));
+    sweep_pub_ = node->create_publisher<visualization_msgs::msg::MarkerArray>(
+      polygon_pub_topic + "_swept", sweep_qos);
+  }
+
   // Add callback for dynamic parameters
   dyn_params_handler_ = node->add_on_set_parameters_callback(
     std::bind(&Polygon::dynamicParametersCallback, this, std::placeholders::_1));
@@ -108,12 +118,18 @@ void Polygon::activate()
   if (visualize_) {
     polygon_pub_->on_activate();
   }
+  if (visualize_sweep_) {
+    sweep_pub_->on_activate();
+  }
 }
 
 void Polygon::deactivate()
 {
   if (visualize_) {
     polygon_pub_->on_deactivate();
+  }
+  if (visualize_sweep_) {
+    sweep_pub_->on_deactivate();
   }
 }
 
@@ -274,9 +290,22 @@ double Polygon::getCollisionTime(
   // Array of points transformed to the frame concerned with pose on each simulation step
   std::vector<Point> points_transformed = collision_points;
 
+  // Cleared before the static check below can return: leaving the previous
+  // cycle's poses in place would redraw a sweep that no longer corresponds,
+  // and it would do so exactly when the obstacle is already inside the polygon.
+  // An empty array then means "this polygon was not simulated", which is worth
+  // seeing.
+  if (visualize_sweep_) {
+    sweep_poses_.clear();
+  }
+
   // Check static polygon
   if (getPointsInside(collision_points) >= min_points_) {
     return 0.0;
+  }
+
+  if (visualize_sweep_) {
+    sweep_poses_.push_back(pose);
   }
 
   // Robot movement simulation
@@ -284,6 +313,9 @@ double Polygon::getCollisionTime(
     // Shift the robot pose towards to the vel during simulation_time_step_ time interval
     // NOTE: vel is changing during the simulation
     projectState(simulation_time_step_, pose, vel);
+    if (visualize_sweep_) {
+      sweep_poses_.push_back(pose);
+    }
     // Transform collision_points to the frame concerned with current robot pose
     points_transformed = collision_points;
     transformPoints(pose, points_transformed);
@@ -313,6 +345,62 @@ void Polygon::publish()
   polygon_.header.stamp = node->now();
   auto msg = std::make_unique<geometry_msgs::msg::PolygonStamped>(polygon_);
   polygon_pub_->publish(std::move(msg));
+
+  publishSweep();
+}
+
+void Polygon::publishSweep()
+{
+  if (!visualize_sweep_ || sweep_poses_.empty()) {
+    return;
+  }
+
+  auto node = node_.lock();
+  if (!node) {
+    throw std::runtime_error{"Failed to lock node"};
+  }
+
+  auto markers = std::make_unique<visualization_msgs::msg::MarkerArray>();
+  int id = 0;
+  for (const Pose & pose : sweep_poses_) {
+    visualization_msgs::msg::Marker marker;
+    marker.header.frame_id = base_frame_id_;
+    marker.header.stamp = node->now();
+    marker.ns = "swept_polygon";
+    marker.id = id++;
+    marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+    marker.scale.x = 0.01;
+    // Alpha encodes what reaching this outline costs. CollisionMonitor scales the
+    // speed by collision_time / time_before_collision, so the near outlines mean a
+    // near-total stop and the far ones barely touch the speed. The loop projects
+    // before it evaluates, so the step that reports `time` is drawn one index
+    // later; index 0 is the static polygon, which costs a full stop.
+    const double collision_time =
+      marker.id > 1 ? (marker.id - 1) * simulation_time_step_ : 0.0;
+    const double change_ratio =
+      time_before_collision_ > 0.0 ? collision_time / time_before_collision_ : 0.0;
+    marker.color.r = 1.0;
+    marker.color.g = 0.8;
+    marker.color.a = std::max(1.0 - change_ratio, 0.15);
+    marker.pose.orientation.w = 1.0;
+    // The simulation moves the robot and leaves the polygon fixed in its frame,
+    // so the shape at step k is the outline offset by that step's pose. One
+    // marker per step and not a merged outline: that is what the check tested.
+    const double cos_theta = std::cos(pose.theta);
+    const double sin_theta = std::sin(pose.theta);
+    for (const Point & p : poly_) {
+      geometry_msgs::msg::Point point;
+      point.x = pose.x + p.x * cos_theta - p.y * sin_theta;
+      point.y = pose.y + p.x * sin_theta + p.y * cos_theta;
+      marker.points.push_back(point);
+    }
+    if (!marker.points.empty()) {
+      marker.points.push_back(marker.points.front());
+    }
+    markers->markers.push_back(marker);
+  }
+  sweep_pub_->publish(std::move(markers));
 }
 
 bool Polygon::getCommonParameters(
@@ -393,6 +481,9 @@ bool Polygon::getCommonParameters(
         node, polygon_name_ + ".simulation_time_step", rclcpp::ParameterValue(0.1));
       simulation_time_step_ =
         node->get_parameter(polygon_name_ + ".simulation_time_step").as_double();
+      nav2_util::declare_parameter_if_not_declared(
+        node, polygon_name_ + ".visualize_sweep", rclcpp::ParameterValue(false));
+      visualize_sweep_ = node->get_parameter(polygon_name_ + ".visualize_sweep").as_bool();
     }
 
     nav2_util::declare_parameter_if_not_declared(
