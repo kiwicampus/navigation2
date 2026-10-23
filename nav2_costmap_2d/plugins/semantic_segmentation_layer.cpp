@@ -341,8 +341,7 @@ void SemanticSegmentationLayer::updateBounds(double robot_x, double robot_y, dou
     return;
   }
 
-  // Repaint from live tiles only, as STVL does: purged tiles leave their cell at the default value and
-  // are touched so the master grid drops them as well
+  // Live tiles only, as STVL: purged tiles are touched so the master drops them.
   if (clear_decayed_tiles_) {
     resetMaps();
     if (touch_whole_layer_) {
@@ -584,9 +583,8 @@ SemanticSegmentationLayer::dynamicParametersCallback(
         clear_decayed_tiles_ = parameter.as_bool();
         updateRemovedTileTracking();
       } else {
-        // dominant_priority is declared as a bool, so it arrives here. Its handler used to sit
-        // in the PARAMETER_INTEGER branch below, which a bool never reaches: setting it did
-        // nothing and reported success.
+        // dominant_priority is a bool; its handler used to sit in the INTEGER
+        // branch below, which a bool never reaches.
         std::stringstream bool_ss(topics_string_);
         std::string bool_source;
         while (bool_ss >> bool_source) {
@@ -665,8 +663,7 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                 node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
                 for(auto & class_name : class_names_for_type){
                   if (!buffer->hasClassName(class_name)) {
-                    // The class map is only filled once labelinfo arrives; without this the
-                    // lookup throws std::out_of_range and takes the costmap node down.
+                    // Without labelinfo the class map is empty and the lookup throws.
                     RCLCPP_WARN(
                       logger_,
                       "Ignoring %s: class '%s' is not known yet, the labelinfo topic has not "
@@ -685,8 +682,7 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                 node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
                 for(auto & class_name : class_names_for_type){
                   if (!buffer->hasClassName(class_name)) {
-                    // The class map is only filled once labelinfo arrives; without this the
-                    // lookup throws std::out_of_range and takes the costmap node down.
+                    // Without labelinfo the class map is empty and the lookup throws.
                     RCLCPP_WARN(
                       logger_,
                       "Ignoring %s: class '%s' is not known yet, the labelinfo topic has not "
@@ -705,8 +701,7 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                 node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
                 for(auto & class_name : class_names_for_type){
                   if (!buffer->hasClassName(class_name)) {
-                    // The class map is only filled once labelinfo arrives; without this the
-                    // lookup throws std::out_of_range and takes the costmap node down.
+                    // Without labelinfo the class map is empty and the lookup throws.
                     RCLCPP_WARN(
                       logger_,
                       "Ignoring %s: class '%s' is not known yet, the labelinfo topic has not "
@@ -725,8 +720,7 @@ SemanticSegmentationLayer::dynamicParametersCallback(
                 node_.lock()->get_parameter(name_ + "." + source + "." + class_type + ".classes", class_names_for_type);
                 for(auto & class_name : class_names_for_type){
                   if (!buffer->hasClassName(class_name)) {
-                    // The class map is only filled once labelinfo arrives; without this the
-                    // lookup throws std::out_of_range and takes the costmap node down.
+                    // Without labelinfo the class map is empty and the lookup throws.
                     RCLCPP_WARN(
                       logger_,
                       "Ignoring %s: class '%s' is not known yet, the labelinfo topic has not "

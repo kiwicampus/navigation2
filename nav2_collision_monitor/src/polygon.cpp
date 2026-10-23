@@ -98,9 +98,7 @@ bool Polygon::configure()
   }
 
   if (visualize_sweep_) {
-    // The published outline is the shape at rest; this is the ground it covers
-    // once projected along the commanded velocity, which is what actually
-    // triggers and grows with speed.
+    // polygon_pub_topic is the shape at rest; this is the ground it sweeps.
     rclcpp::QoS sweep_qos = rclcpp::QoS(rclcpp::KeepLast(1));
     sweep_pub_ = node->create_publisher<visualization_msgs::msg::MarkerArray>(
       polygon_pub_topic + "_swept", sweep_qos);
@@ -290,11 +288,8 @@ double Polygon::getCollisionTime(
   // Array of points transformed to the frame concerned with pose on each simulation step
   std::vector<Point> points_transformed = collision_points;
 
-  // Cleared before the static check below can return: leaving the previous
-  // cycle's poses in place would redraw a sweep that no longer corresponds,
-  // and it would do so exactly when the obstacle is already inside the polygon.
-  // An empty array then means "this polygon was not simulated", which is worth
-  // seeing.
+  // Cleared before the static check can return, so a stale sweep is never
+  // redrawn. Empty then means "not simulated this cycle".
   if (visualize_sweep_) {
     sweep_poses_.clear();
   }
@@ -371,11 +366,9 @@ void Polygon::publishSweep()
     marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
     marker.action = visualization_msgs::msg::Marker::ADD;
     marker.scale.x = 0.01;
-    // Alpha encodes what reaching this outline costs. CollisionMonitor scales the
-    // speed by collision_time / time_before_collision, so the near outlines mean a
-    // near-total stop and the far ones barely touch the speed. The loop projects
-    // before it evaluates, so the step that reports `time` is drawn one index
-    // later; index 0 is the static polygon, which costs a full stop.
+    // Alpha mirrors the speed the monitor would allow here: solid is a near-stop,
+    // faint barely slows down. The loop projects before it evaluates, so the step
+    // reporting `time` is drawn one index later.
     const double collision_time =
       marker.id > 1 ? (marker.id - 1) * simulation_time_step_ : 0.0;
     const double change_ratio =
@@ -384,9 +377,8 @@ void Polygon::publishSweep()
     marker.color.g = 0.8;
     marker.color.a = std::max(1.0 - change_ratio, 0.15);
     marker.pose.orientation.w = 1.0;
-    // The simulation moves the robot and leaves the polygon fixed in its frame,
-    // so the shape at step k is the outline offset by that step's pose. One
-    // marker per step and not a merged outline: that is what the check tested.
+    // The simulation moves the robot, not the polygon: step k is the outline at
+    // that step's pose.
     const double cos_theta = std::cos(pose.theta);
     const double sin_theta = std::sin(pose.theta);
     for (const Point & p : poly_) {
@@ -681,7 +673,7 @@ Polygon::dynamicParametersCallback(
       if (param_name == polygon_name_ + "." + "time_before_collision") {
         const double value = parameter.as_double();
         if (value <= 0.0) {
-          // CollisionMonitor divides the collision time by this value.
+          // CollisionMonitor divides by it.
           result.successful = false;
           result.reason = polygon_name_ + ".time_before_collision must be > 0";
           return result;
@@ -690,7 +682,7 @@ Polygon::dynamicParametersCallback(
       } else if (param_name == polygon_name_ + "." + "simulation_time_step") {
         const double value = parameter.as_double();
         if (value <= 0.0) {
-          // A non-positive step would make the simulation loop never advance.
+          // A non-positive step never advances the loop.
           result.successful = false;
           result.reason = polygon_name_ + ".simulation_time_step must be > 0";
           return result;

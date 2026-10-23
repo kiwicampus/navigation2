@@ -261,16 +261,13 @@ protected:
   tf2::Duration transform_tolerance_;
   nav_msgs::msg::OccupancyGrid::SharedPtr map_buffer_;
 
-  // Static map erosion. `erosion_radius_` and `erosion_ring_thickness_` are
-  // load time only (the disc offsets are precomputed from them);
-  // `erosion_enabled_` is a free runtime toggle so the way metadata can flip it
-  // on every way transition.
+  // Erosion. The two geometry params are load time only (the disc offsets are
+  // precomputed); erosion_enabled_ is a free runtime toggle.
   double erosion_radius_{0.0};
   double erosion_ring_thickness_{0.0};
   bool erosion_enabled_{false};
   bool erosion_active_{false};
-  // Drivable region of the raw map, one bit per cell. This is the only full
-  // map sized state the erosion keeps; the masks themselves are windowed.
+  // Drivable region of the raw map, the only full map sized state kept.
   std::vector<bool> erosion_raw_free_;
   std::vector<std::pair<int, int>> erosion_free_offsets_;
   std::vector<std::pair<int, int>> erosion_ring_offsets_;

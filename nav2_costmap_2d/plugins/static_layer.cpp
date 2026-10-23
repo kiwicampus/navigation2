@@ -346,12 +346,8 @@ StaticLayer::computeErosionOffsets()
 
   const double free_radius_cells = erosion_radius_ / resolution_;
   const double ring_radius_cells = (erosion_radius_ + erosion_ring_thickness_) / resolution_;
-  // Radii are compared with a RELATIVE tolerance: radius / resolution is not
-  // exact in binary floating point, and info.resolution is a float32, so
-  // 1.0m / 0.1 yields 9.99999985 cells rather than 10. Without this the
-  // outermost cells of the disc are silently dropped (~0.15% of a real
-  // segmapping). The tolerance must scale with the radius, an absolute one is
-  // large enough at 3 cells and too small at 10.
+  // Relative, not absolute: resolution is a float32, so 1.0m / 0.1 gives
+  // 9.99999985 cells and the outer ring of the disc would be dropped.
   constexpr double kRadiusRelativeTolerance = 1e-6;
   const double free_radius_sq =
     free_radius_cells * free_radius_cells * (1.0 + kRadiusRelativeTolerance);
@@ -412,10 +408,8 @@ StaticLayer::updateErosionWindow(int x0, int y0, int x1, int y1)
       return erosion_raw_free_[static_cast<size_t>(my) * map_w + mx];
     };
 
-  // Seed the growth with the drivable cells that have a non-drivable
-  // 8-neighbour: only the border of the region can push the boundary outwards.
-  // Neighbours are read from the full map mask, so the window edges are not a
-  // special case.
+  // Only border cells can push the boundary out. Neighbours come from the full
+  // map mask, so window edges need no special case.
   std::vector<std::pair<int, int>> seeds;
   for (int my = wy0; my <= wy1; ++my) {
     for (int mx = wx0; mx <= wx1; ++mx) {
@@ -457,8 +451,7 @@ StaticLayer::updateErosionWindow(int x0, int y0, int x1, int y1)
           if (!ring) {
             erosion_window_free_[index] = true;
           } else if (!erosion_window_free_[index]) {
-            // Tested against the finished free mask, so a cell is never both
-            // drivable and boundary and no second pass is needed.
+            // Against the finished free mask: no cell is both, no second pass.
             erosion_window_ring_[index] = true;
           }
         }
@@ -554,8 +547,7 @@ StaticLayer::incomingUpdate(map_msgs::msg::OccupancyGridUpdate::ConstSharedPtr u
       const unsigned char raw = static_cast<unsigned char>(update->data[di]);
       costmap_[index] = interpretValue(update->data[di++]);
       if (track_erosion) {
-        // Keep the drivable region in step with partial updates, otherwise the
-        // erosion would keep growing from cells the map no longer reports.
+        // Or the erosion keeps growing from cells the map no longer reports.
         erosion_raw_free_[index] = isRawFree(raw);
       }
     }
@@ -658,8 +650,7 @@ StaticLayer::updateCosts(
     // if not rolling, the layered costmap (master_grid) has same coordinates as this layer
     if (erosion_active_) {
       updateErosionWindow(min_i, min_j, max_i - 1, max_j - 1);
-      // Same as updateWithTrueOverwrite/updateWithMax, but reading through the
-      // erosion masks instead of straight out of costmap_.
+      // updateWithTrueOverwrite/updateWithMax, but read through the masks.
       for (int j = min_j; j < max_j; ++j) {
         for (int i = min_i; i < max_i; ++i) {
           const unsigned char cost = getStaticCost(i, j);
@@ -694,9 +685,8 @@ StaticLayer::updateCosts(
     tf2::fromMsg(transform.transform, tf2_transform);
 
     if (erosion_active_) {
-      // Erode only the slice of the map this window reads. The transform is
-      // rigid, so the axis aligned box of the four transformed corners covers
-      // every cell the loop below can reach.
+      // Rigid transform, so the box of the four transformed corners covers
+      // every cell the loop can reach.
       int rx0 = std::numeric_limits<int>::max();
       int ry0 = std::numeric_limits<int>::max();
       int rx1 = std::numeric_limits<int>::min();
@@ -760,11 +750,8 @@ StaticLayer::dynamicParametersCallback(
     if (param_name == name_ + "." + "erosion_radius" ||
       param_name == name_ + "." + "erosion_ring_thickness")
     {
-      // Actually reject these, rather than only warning: the masks are built
-      // once from the whole map, so a new value would not be applied, and a
-      // parameter that reads back as changed while the layer keeps using the
-      // old one is a trap when debugging on a robot. Use erosion_enabled to
-      // turn the erosion on and off at runtime.
+      // Rejected, not warned: the masks are built once on map load, so a new
+      // value never applies. Use erosion_enabled to toggle at runtime.
       RCLCPP_WARN(
         logger_, "%s is not a dynamic parameter and cannot be changed while "
         "running. Rejecting parameter update.", param_name.c_str());

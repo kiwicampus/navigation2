@@ -316,9 +316,7 @@ protected:
   rclcpp_lifecycle::LifecyclePublisher<geometry_msgs::msg::PolygonStamped>::SharedPtr polygon_pub_;
   /// @brief Publisher of the swept area, one marker per simulation step
   rclcpp_lifecycle::LifecyclePublisher<visualization_msgs::msg::MarkerArray>::SharedPtr sweep_pub_;
-  /// @brief Robot poses the last getCollisionTime() projected through.
-  /// Mutable because that method is const and is where the poses already exist:
-  /// recomputing them for the visualisation would let the two drift apart.
+  /// Robot poses from last getCollisionTime(); mutable for use in const method.
   mutable std::vector<Pose> sweep_poses_;
 
   /// @brief Polygon points (vertices) in a base_frame_id_
