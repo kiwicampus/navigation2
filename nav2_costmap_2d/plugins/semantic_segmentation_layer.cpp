@@ -567,6 +567,8 @@ bool SemanticSegmentationLayer::getSegmentationTileMaps(
 SemanticSegmentationLayer::dynamicParametersCallback(
   std::vector<rclcpp::Parameter> parameters)
 {
+  static const std::string kDominantPrioritySuffix = ".dominant_priority";
+
   std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
   auto result = rcl_interfaces::msg::SetParametersResult();
   for (auto parameter : parameters) {
@@ -582,9 +584,14 @@ SemanticSegmentationLayer::dynamicParametersCallback(
       } else if (name == name_ + "." + "clear_decayed_tiles") {
         clear_decayed_tiles_ = parameter.as_bool();
         updateRemovedTileTracking();
-      } else {
+      } else if (name.size() > kDominantPrioritySuffix.size() && // NOLINT
+        name.compare(
+          name.size() - kDominantPrioritySuffix.size(),
+          kDominantPrioritySuffix.size(), kDominantPrioritySuffix) == 0)
+      {
         // dominant_priority is a bool; its handler used to sit in the INTEGER
-        // branch below, which a bool never reaches.
+        // branch below, which a bool never reaches. Another layer's
+        // dominant_priority reaches here too and simply matches nothing below.
         std::stringstream bool_ss(topics_string_);
         std::string bool_source;
         while (bool_ss >> bool_source) {
@@ -615,6 +622,16 @@ SemanticSegmentationLayer::dynamicParametersCallback(
             }
           }
         }
+      } else if (name.rfind(name_ + ".", 0) == 0) {
+        // Every other bool of this layer is load time only: read once in
+        // onInitialize and handed to the segmentation buffer. Reject instead of
+        // ignoring, otherwise the parameter reads back as changed while the
+        // layer keeps using the old value, which is a trap when debugging on a
+        // robot. The prefix check is required: this callback runs on the
+        // costmap node, so it also sees the parameters of every other layer.
+        result.successful = false;
+        result.reason = name + " is not a dynamic parameter of this layer";
+        return result;
       }
     }
 
