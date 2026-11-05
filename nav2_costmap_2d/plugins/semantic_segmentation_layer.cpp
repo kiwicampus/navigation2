@@ -300,6 +300,12 @@ void SemanticSegmentationLayer::onInitialize()
   }
   updateRemovedTileTracking();
 
+  // Every declareParameter() above recorded its short name in local_params_.
+  for (const auto& param_name : local_params_)
+  {
+    owned_params_.insert(getFullName(param_name));
+  }
+
   dyn_params_handler_ = node->add_on_set_parameters_callback(
     std::bind(
       &SemanticSegmentationLayer::dynamicParametersCallback,
@@ -567,8 +573,6 @@ bool SemanticSegmentationLayer::getSegmentationTileMaps(
 SemanticSegmentationLayer::dynamicParametersCallback(
   std::vector<rclcpp::Parameter> parameters)
 {
-  static const std::string kDominantPrioritySuffix = ".dominant_priority";
-
   std::lock_guard<Costmap2D::mutex_t> guard(*getMutex());
   auto result = rcl_interfaces::msg::SetParametersResult();
   for (auto parameter : parameters) {
@@ -584,14 +588,11 @@ SemanticSegmentationLayer::dynamicParametersCallback(
       } else if (name == name_ + "." + "clear_decayed_tiles") {
         clear_decayed_tiles_ = parameter.as_bool();
         updateRemovedTileTracking();
-      } else if (name.size() > kDominantPrioritySuffix.size() && // NOLINT
-        name.compare(
-          name.size() - kDominantPrioritySuffix.size(),
-          kDominantPrioritySuffix.size(), kDominantPrioritySuffix) == 0)
-      {
-        // dominant_priority is a bool; its handler used to sit in the INTEGER
-        // branch below, which a bool never reaches. Another layer's
-        // dominant_priority reaches here too and simply matches nothing below.
+      } else if (owned_params_.count(name)) {
+        // dominant_priority is a bool, so it cannot live in the INTEGER branch
+        // below. It is per source and per class type, so the scan builds every
+        // name it could have and compares them whole.
+        bool handled = false;
         std::stringstream bool_ss(topics_string_);
         std::string bool_source;
         while (bool_ss >> bool_source) {
@@ -603,6 +604,7 @@ SemanticSegmentationLayer::dynamicParametersCallback(
               if (name != name_ + "." + bool_source + "." + class_type + ".dominant_priority") {
                 continue;
               }
+              handled = true;
               std::vector<std::string> class_names_for_type;
               node_.lock()->get_parameter(
                 name_ + "." + bool_source + "." + class_type + ".classes", class_names_for_type);
@@ -622,16 +624,13 @@ SemanticSegmentationLayer::dynamicParametersCallback(
             }
           }
         }
-      } else if (name.rfind(name_ + ".", 0) == 0) {
-        // Every other bool of this layer is load time only: read once in
-        // onInitialize and handed to the segmentation buffer. Reject instead of
-        // ignoring, otherwise the parameter reads back as changed while the
-        // layer keeps using the old value, which is a trap when debugging on a
-        // robot. The prefix check is required: this callback runs on the
-        // costmap node, so it also sees the parameters of every other layer.
-        result.successful = false;
-        result.reason = name + " is not a dynamic parameter of this layer";
-        return result;
+        if (!handled) {
+          // The rest are load time only. Rejecting keeps them from reading
+          // back as changed while the layer still uses the startup value.
+          result.successful = false;
+          result.reason = name + " is not a dynamic parameter of this layer";
+          return result;
+        }
       }
     }
 

@@ -41,6 +41,7 @@
 
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 
 #include "rclcpp/rclcpp.hpp"
@@ -181,6 +182,10 @@ class SemanticSegmentationLayer : public CostmapLayer
 
     std::string global_frame_;
     std::string topics_string_;
+
+    // Full names of the parameters this layer declared. The callback runs on
+    // the costmap node, so it also sees every other layer's parameters.
+    std::unordered_set<std::string> owned_params_;
 
     std::map<std::string, uint8_t> class_map_;
 
